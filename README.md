@@ -27,10 +27,16 @@ Place the following files inside:
     ├── content/
     └── native/
 ```
-
+
+The Android libraries and game data must be obtained from the original Android version of the game.
+
 ## Obtaining the game files
 
-The required native libraries are located in the Android APK:
+The original Android APK can be obtained from the [ABYSSAL repository](https://github.com/TheWWWorm/abyssal).
+
+Open the APK with an archive utility such as 7-Zip or WinRAR.
+
+The required native libraries are located in:
 
 ```text
 lib/arm64-v8a/
@@ -81,13 +87,9 @@ The resulting structure should be:
 └── native/
 ```
 
-These folders contain the game content and native data required by the port.
-
 ## Asset pack
 
 The port supports an indexed asset pack for faster loading from the SD card.
-
-Asset packing is enabled by default.
 
 On the first launch, the port automatically creates:
 
@@ -96,25 +98,25 @@ On the first launch, the port automatically creates:
 /switch/abyssal_nx/assets.nxidx
 ```
 
-The asset pack is generated from the loose files in:
+The asset pack is generated from:
 
 ```text
 /switch/abyssal_nx/assets/
 ```
 
-It does not need to be created manually.
+These files do not need to be created manually.
 
-If the asset pack is missing or the contents of `assets/` have changed, it is rebuilt automatically. If packing fails, the port falls back to loading the loose assets directly.
+If the asset pack is missing or outdated, it is rebuilt automatically. If packing fails, the port falls back to loading the loose assets directly.
 
 ## Notes
 
 Do not launch the application from Album/applet mode if the available memory is insufficient.
 
-The engine reserves a large amount of memory for loading the Android libraries, so launching through a title override or a forwarder is recommended.
+Launching through a title override or forwarder is recommended.
 
 ## Controls
 
-The Nintendo Switch controller is mapped to the Godot input system:
+The Nintendo Switch controller is mapped to the Godot input system.
 
 | Nintendo Switch | Godot         |
 | --------------- | ------------- |
@@ -134,18 +136,6 @@ The Nintendo Switch controller is mapped to the Godot input system:
 | +               | Start         |
 | -               | Back          |
 
-Analog stick deadzone can be configured with:
-
-```text
-deadzone 18
-```
-
-Touch controls are disabled by default:
-
-```text
-touch_controls 0
-```
-
 ## Configuration
 
 The configuration file is:
@@ -154,9 +144,9 @@ The configuration file is:
 /switch/abyssal_nx/config.txt
 ```
 
-If the file does not exist, the port creates it automatically with the default configuration.
+The configuration can be used to adjust the screen resolution, analog deadzone, asset packing, Vulkan rendering and touch controls.
 
-Default configuration:
+Example:
 
 ```text
 screen_width 1280
@@ -168,20 +158,6 @@ touch_controls 0
 rendering_method mobile
 ```
 
-### Configuration options
-
-| Option             | Description                       |
-| ------------------ | --------------------------------- |
-| `screen_width`     | Render width                      |
-| `screen_height`    | Render height                     |
-| `deadzone`         | Analog-stick dead zone in percent |
-| `assetpack`        | Enables the indexed asset pack    |
-| `enable_vulkan`    | Enables Vulkan/NVK rendering      |
-| `touch_controls`   | Enables Android touch controls    |
-| `rendering_method` | Godot rendering method            |
-
-The available configuration variables are defined directly in the port source.
-
 ## Resolution
 
 The default resolution is:
@@ -191,7 +167,7 @@ screen_width 1280
 screen_height 720
 ```
 
-The resolution can be changed directly in `config.txt`.
+The resolution can be changed in `config.txt`.
 
 For example:
 
@@ -200,41 +176,45 @@ screen_width 1920
 screen_height 1080
 ```
 
-The port accepts resolutions up to 1920×1080. Smaller resolutions such as `960x540` or `640x360` can be used to reduce rendering load.
+Lower resolutions can be used to reduce rendering load.
 
 ## Build
 
-The project requires:
+### Requirements
 
-* devkitPro
+Install the devkitPro Nintendo Switch toolchain, including:
+
 * devkitA64
 * libnx
-* GNU Make
+* required Switch portlibs
 
-The project includes its Mesa Switch SDK in:
+### Mesa
 
-```text
-mesa-sdk/
-```
+This project does **not** include `mesa-sdk`.
 
-The Makefile uses the included Mesa libraries for Vulkan/EGL/GLES rendering.
+Mesa must be built separately from:
 
-Required portlibs:
+**NaGaa95/mesa-switch**
 
-```bash
-dkp-pacman -S switch-zlib switch-libexpat
-```
+https://github.com/NaGaa95/mesa-switch
 
-Build from a devkitPro shell:
+Build/install the required Mesa Switch libraries before building `abyssal_nx`.
+
+The resulting Mesa libraries must be available to the `abyssal_nx` build according to the paths expected by the Makefile.
+
+### Build abyssal_nx
+
+Clone the repository and build it with:
 
 ```bash
 make
 ```
 
-Clean the build:
+For a clean rebuild:
 
 ```bash
 make clean
+make
 ```
 
 The build produces:
@@ -250,19 +230,20 @@ abyssal_nx.elf
 ```text
 abyssal_nx/
 ├── source/
-├── mesa-sdk/
 ├── Makefile
 ├── LICENSE
 └── README.md
 ```
 
+Mesa is built separately and is not included in this repository.
+
 ## Credits
 
-* **NaGaa95** — custom Mesa and Vulkan work.
-* **Delson (delsonazevedo)** — original Godot 4 Nintendo Switch wrapper this project was retargeted from.
-* **TheFloW (Andy Nguyen), fgsfds & Rinnegatamante** — SoLoader lineage used by the wrapper.
-* **Godot Engine contributors** — Godot Engine, licensed under MIT.
-* **Nintendo Switch homebrew community** — tools, libraries and documentation used by the project.
+**NaGaa95 — custom Mesa and Vulkan work.**
+**Delson (delsonazevedo) — original Godot 4 Nintendo Switch wrapper this project was retargeted from.**
+**TheFloW (Andy Nguyen), fgsfds & Rinnegatamante — SoLoader lineage used by the wrapper.**
+**Godot Engine contributors — Godot Engine, licensed under MIT.**
+**Nintendo Switch homebrew community — tools, libraries and documentation used by the project.**
 
 ## Legal
 
@@ -270,4 +251,8 @@ abyssal_nx/
 
 This project is an unofficial Nintendo Switch port and is not affiliated with or endorsed by Fishlabs or the original rights holders.
 
-Game assets and Android libraries are not included in this repository unless explicitly provided by their respective copyright holders.
+Game assets and Android libraries are not included in this repository.
+
+Users must obtain the original game and required files themselves.
+
+Unless otherwise specified, the source code of this project is distributed under the MIT License. See `LICENSE` for details.
