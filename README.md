@@ -192,9 +192,7 @@ Install the devkitPro Nintendo Switch toolchain, including:
 
 This project does **not** include `mesa-sdk`.
 
-Mesa must be built separately from:
-
-**NaGaa95/mesa-switch**
+Mesa must be built separately from this repository:
 
 https://github.com/NaGaa95/mesa-switch
 
