@@ -242,7 +242,7 @@ Mesa is built separately and is not included in this repository.
 * Delson (delsonazevedo) — original Godot 4 Nintendo Switch wrapper this project was retargeted from.
 * TheFloW (Andy Nguyen), fgsfds & Rinnegatamante — SoLoader lineage used by the wrapper.
 * Godot Engine contributors — Godot Engine, licensed under MIT.
-* Nintendo Switch homebrew community — tools, libraries and documentation used by the project.**
+* Nintendo Switch homebrew community — tools, libraries and documentation used by the project.
 
 ## Legal
 
