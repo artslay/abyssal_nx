@@ -27,9 +27,7 @@ Place the following files inside:
     ├── content/
     └── native/
 ```
-
-The Android libraries and game data must be obtained from the original Android version of the game.
-
+
 ## Obtaining the game files
 
 The required native libraries are located in the Android APK:
