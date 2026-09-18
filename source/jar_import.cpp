@@ -397,6 +397,7 @@ struct ClassData {
 
   explicit ClassData(const std::vector<uint8_t> &raw){
     Rdr r(raw);
+    if(r.u4()!=0xcafebabeu)fail("Invalid class magic");
     uint16_t minor=r.u2();uint16_t major=r.u2();
     uint16_t n=r.u2();
     if(n<2)fail("Invalid constant pool count");
@@ -458,12 +459,12 @@ struct ClassData {
       ++i;
     }
 
-    validate_pool();
     r.u2();
     uint16_t this_class=r.u2();
     uint16_t super_class=r.u2();
     name=class_name(this_class,"this_class");
     if(super_class)class_name(super_class,"super_class");
+    validate_pool();
 
     uint16_t interfaces=r.u2();
     for(uint16_t j=0;j<interfaces;++j)
