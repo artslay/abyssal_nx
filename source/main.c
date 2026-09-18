@@ -1114,11 +1114,23 @@ static void load_module(so_module *mod, const char *name, void *base, size_t lim
 int main(void) {
   cpu_boost(1);
 
-  if (read_config(CONFIG_NAME) != 0)
-    write_config(CONFIG_NAME);
+  // Resolve the launch directory before reading config.txt. This matters when
+  // the NRO is started through a title override/forwarder: CONFIG_NAME alone
+  // could otherwise read or create a different config.txt in the launch CWD.
+  resolve_data_root();
+  char config_path[320];
+  snprintf(config_path, sizeof(config_path), "%s/%s",
+           config.data_root[0] ? config.data_root : DEFAULT_DATA_ROOT,
+           CONFIG_NAME);
+  if (read_config(config_path) != 0)
+    write_config(config_path);
+
+  // read_config() resets the runtime roots to their compile-time defaults.
+  // Resolve once more so copies launched from another /switch/<folder> keep
+  // using the actual folder containing libgodot_android.so and the assets.
+  resolve_data_root();
 
   check_syscalls();
-  resolve_data_root(); // adopt the actual launch folder as the data root
   stats_open();
   check_data();
   apply_asset_hotfixes(); // restore game data files known to be missing from the APK export
