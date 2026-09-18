@@ -79,24 +79,23 @@ typedef struct { uint32_t repl_word; uint32_t expect; uintptr_t vaddr; void *rep
 // callback arrives too late. Catch the quit request at its source and terminate
 // the Switch process immediately, matching Android's force-quit behavior.
 static void switch_scene_tree_quit(int p_exit_code) {
-  debugPrintf("[patch] SceneTree::quit(%d) -> clean homebrew exit\n", p_exit_code);
+  debugPrintf("[patch] SceneTree::quit(%d) -> returning to homebrew loader\n", p_exit_code);
+  // Keep libnx's normal NRO exit mode (0). __libnx_exit() performs the regular
+  // service cleanup and then __nx_exit() restores the original crt0 stack and
+  // branches to the return address supplied by hbloader.
   extern u32 __nx_applet_exit_mode;
   extern void NX_NORETURN __libnx_exit(int rc);
-  // NROs launched by the homebrew environment are not NSOs, so libnx's
-  // normal exit-mode (0) skips the applet self-exit handshake. Mode 1 forces
-  // appletExit() to register the loader return callback before __nx_exit()
-  // transfers control back to hbloader/HBMenu.
-  __nx_applet_exit_mode = 1;
+  __nx_applet_exit_mode = 0;
   __libnx_exit(p_exit_code);
 }
 
 // Fallback for engine builds where SceneTree::quit() is not present in the
 // dynamic symbol table: SceneTree::quit() always sets OS::set_exit_code() first.
 static void switch_os_set_exit_code(int p_exit_code) {
-  debugPrintf("[patch] OS::set_exit_code(%d) -> clean homebrew exit\n", p_exit_code);
+  debugPrintf("[patch] OS::set_exit_code(%d) -> returning to homebrew loader\n", p_exit_code);
   extern u32 __nx_applet_exit_mode;
   extern void NX_NORETURN __libnx_exit(int rc);
-  __nx_applet_exit_mode = 1;
+  __nx_applet_exit_mode = 0;
   __libnx_exit(p_exit_code);
 }
 
