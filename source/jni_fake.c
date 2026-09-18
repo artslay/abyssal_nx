@@ -314,11 +314,11 @@ static int gd_dir_open(int access_type, const char *path) {
     if (!gd_dirs[i].dir) {
       gd_dirs[i].dir = d;
       snprintf(
-    gd_dirs[i].path,
-    sizeof(gd_dirs[i].path),
-    "%s",
-    open_path
-);
+        gd_dirs[i].path,
+        sizeof(gd_dirs[i].path),
+        "%s",
+        buf
+      );
       gd_dirs[i].current[0] = 0;
       mutexUnlock(&gd_dir_lock);
       return i + 1;
