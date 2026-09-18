@@ -151,6 +151,11 @@ int stat_fake(const char *path, void *st) {
   struct stat in;
   char sb[640];
   path = sandbox_path(path, sb, sizeof(sb));
+  char jarbuf[768];
+  if (path_is_jar_file(path)) {
+    path = resolve_jar_input(path, jarbuf, sizeof(jarbuf));
+    if (!path) return -1;
+  }
   char buf[640];
   const char *p = obb_resolve(path, buf, sizeof(buf));
   int rc = stat(p, &in);
