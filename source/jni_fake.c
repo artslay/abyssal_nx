@@ -25,6 +25,7 @@
 #include "libc_shim.h"
 #include "jni_fake.h"
 #include "godot_shim.h"
+#include "jar_import.h"
 #include <errno.h>
 
 #define JNI_OK 0
@@ -384,7 +385,12 @@ static char pck_pool_path[288];
 
 static int path_is_pck(const char *p) {
   size_t l = strlen(p);
-  return l > 4 && strcmp(p + l - 4, ".pck") == 0;
+  return l > 4 && strcasecmp(p + l - 4, ".pck") == 0;
+}
+
+static int path_is_jar(const char *p) {
+  size_t l = strlen(p);
+  return l > 4 && strcasecmp(p + l - 4, ".jar") == 0;
 }
 
 // godot FileAccess::ModeFlags
