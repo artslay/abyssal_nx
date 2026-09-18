@@ -534,12 +534,12 @@ struct Evaluator {
     auto ci=classes.find(cn);if(ci==classes.end())fail("Missing class "+cn);const ClassData &cl=ci->second;
     auto cd=cl.code(mn,md);const auto &code=cd.first;size_t locals_n=cd.second;
     std::vector<Val> local(locals_n);for(size_t i=0;i<args.size()&&i<local.size();++i)local[i]=args[i];
-    std::vector<Val> st;size_t p=0;
-    auto branch=[&](int16_t off){int64_t t=int64_t(p)-3+off;if(t<0||t>=int64_t(code.size()))fail("Invalid branch");p=size_t(t);};
+    std::vector<Val> st;size_t p=0,branch_base=0;
+    auto branch=[&](int16_t off){int64_t t=int64_t(branch_base)+off;if(t<0||t>=int64_t(code.size()))fail("Invalid branch");p=size_t(t);};
     auto bit_reader=[&](std::shared_ptr<Arr> a,size_t idx)->Val{if(!a||idx>=a->v.size())fail("Invalid array access");return a->v[idx];};
     for(int step=0;step<100000;++step){
       if(p>=code.size())fail("Method fell off end");
-      size_t start=p;uint8_t op=code[p++];
+      size_t start=p;branch_base=start;uint8_t op=code[p++];
       switch(op){
         case 0:break;
         case 1:st.emplace_back(std::monostate{});break;
