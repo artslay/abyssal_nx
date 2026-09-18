@@ -741,7 +741,8 @@ static std::vector<uint8_t> bmp_png(const std::vector<uint8_t>&d,bool alpha){
 
 static bool safe_name(const std::string &n){
   if(n.empty()||n[0]=='/'||n.find('\\')!=std::string::npos||n.find(':')!=std::string::npos)return false;
-  for(char c:n)if(!std::string("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./-").empty()&&std::string("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./-").find(c)==std::string::npos)return false;
+  static const std::string allowed="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./-";
+  for(char c:n)if(allowed.find(c)==std::string::npos)return false;
   size_t p=0;while(true){size_t q=n.find('/',p);std::string part=n.substr(p,q==std::string::npos?n.size()-p:q-p);if(part.empty()||part=="."||part=="..")return false;if(q==std::string::npos)break;p=q+1;}return true;
 }
 static void write_bin(const std::string &path,const std::vector<uint8_t>&d){mkdir_recursive(dirname_of(path));FILE*f=fopen(path.c_str(),"wb");if(!f)fail("Cannot create "+path);wrbytes(f,d.data(),d.size());fclose(f);}
@@ -920,7 +921,7 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
   auto dt=jobj();dt->v["a:[S"]=ja(sint);constants->v["dt"]=jo(dt);
 
   int chapters=0;
-  auto ec_it=st.find({"e","g","[S"});
+  auto ec_it=st.find(std::make_tuple("e","g","[S"));
   if(ec_it!=st.end()&&std::holds_alternative<std::shared_ptr<Arr>>(ec_it->second)&&std::get<std::shared_ptr<Arr>>(ec_it->second))
     chapters=int(std::get<std::shared_ptr<Arr>>(ec_it->second)->v.size());
   if(chapters<=0)fail("The declarative content profile contains no campaign chapters");
