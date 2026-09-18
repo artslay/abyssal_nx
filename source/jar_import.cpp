@@ -733,6 +733,10 @@ struct Evaluator {
     return {};
   }
 
+  static uint16_t bc_u16(const std::vector<uint8_t> &c,size_t &p){
+    if(p+2>c.size())fail("Invalid bytecode operand");
+    uint16_t v=(uint16_t(c[p])<<8)|uint16_t(c[p+1]);p+=2;return v;
+  }
   static int32_t i32(const std::vector<uint8_t> &c,size_t &p){if(p+4>c.size())fail("Invalid branch");int32_t v=int32_t((uint32_t(c[p])<<24)|(uint32_t(c[p+1])<<16)|(uint32_t(c[p+2])<<8)|c[p+3]);p+=4;return v;}
   static int16_t i16(const std::vector<uint8_t> &c,size_t &p){if(p+2>c.size())fail("Invalid branch");int16_t v=int16_t((uint16_t(c[p])<<8)|c[p+1]);p+=2;return v;}
 
@@ -754,7 +758,7 @@ struct Evaluator {
         case 16:if(p+1>code.size())fail("Invalid bipush");st.emplace_back(int64_t(int8_t(code[p++])));break;
         case 17:st.emplace_back(int64_t(i16(code,p)));break;
         case 18:st.push_back(constant_value(cl,code[p++]));break;
-        case 19:case 20:{if(p+2>code.size())fail("Invalid ldc_w");uint16_t idx=rd16(code.data()+p);p+=2;st.push_back(constant_value(cl,idx));break;}
+        case 19:case 20:{if(p+2>code.size())fail("Invalid ldc_w");uint16_t idx=bc_u16(code,p);st.push_back(constant_value(cl,idx));break;}
         case 21:case 22:case 23:case 24:case 25:{uint8_t i=code[p++];if(i>=local.size())fail("Invalid local");st.push_back(local[i]);break;}
         case 26:case 27:case 28:case 29:case 30:case 31:case 32:case 33:case 34:case 35:
         case 36:case 37:case 38:case 39:case 40:case 41:case 42:case 43:case 44:case 45:{size_t i=(op-26)%4;if(i>=local.size())fail("Invalid local");st.push_back(local[i]);break;}
@@ -799,7 +803,7 @@ struct Evaluator {
         case 172:case 173:case 174:case 175:case 176:{Val r=st.back();return r;}
         case 177:return {};
         case 178:case 179:case 180:case 181:{
-          uint16_t idx=rd16(code.data()+p);p+=2;auto [owner,field,fd]=cl.reference(idx);auto key=std::make_tuple(owner,field,fd);
+          uint16_t idx=bc_u16(code,p);auto [owner,field,fd]=cl.reference(idx);auto key=std::make_tuple(owner,field,fd);
           if(op==178){auto it=statics.find(key);if(it==statics.end())fail("Unspecified static input");st.push_back(it->second);}
           else if(op==179){statics[key]=st.back();st.pop_back();}
           else if(op==180){auto o=std::get<std::shared_ptr<Obj>>(st.back());st.pop_back();st.push_back(o&&o->f.count(field+":"+fd)?o->f[field+":"+fd]:defval(fd));}
@@ -811,11 +815,11 @@ struct Evaluator {
           std::shared_ptr<Obj> obj;if(op!=184){obj=std::get<std::shared_ptr<Obj>>(st.back());st.pop_back();}
           Val ret=summary(owner,name,desc,obj,aa);if(!desc.empty()&&desc.back()!='V')st.push_back(ret);break;
         }
-        case 187:{uint16_t idx=rd16(code.data()+p);p+=2;auto o=std::make_shared<Obj>();o->type=cl.constant_str(idx);st.push_back(o);break;}
+        case 187:{uint16_t idx=bc_u16(code,p);auto o=std::make_shared<Obj>();o->type=cl.constant_str(idx);st.push_back(o);break;}
         case 188:{uint8_t type=code[p++];(void)type;int64_t n=as_i(st.back());st.pop_back();if(n<0||n>100000)fail("Oversized literal array");auto a=std::make_shared<Arr>();a->v.resize(size_t(n),Val(int64_t(0)));st.push_back(a);break;}
-        case 189:{p+=2;int64_t n=as_i(st.back());st.pop_back();if(n<0||n>100000)fail("Oversized literal array");auto a=std::make_shared<Arr>();a->v.resize(size_t(n),Val(std::monostate{}));st.push_back(a);break;}
+        case 189:{bc_u16(code,p);int64_t n=as_i(st.back());st.pop_back();if(n<0||n>100000)fail("Oversized literal array");auto a=std::make_shared<Arr>();a->v.resize(size_t(n),Val(std::monostate{}));st.push_back(a);break;}
         case 190:{auto a=std::get<std::shared_ptr<Arr>>(st.back());st.back()=Val(int64_t(a?a->v.size():0));break;}
-        case 192:p+=2;break;
+        case 192:bc_u16(code,p);break;
         case 198:case 199:{int16_t off=i16(code,p);Val a=st.back();st.pop_back();bool c=is_null(a)==(op==198);if(c)branch(off);break;}
         default:fail("Unsupported data opcode");
       }
