@@ -1288,21 +1288,47 @@ int main(void) {
   }
 
   if (jni_quit_requested) {
-    // The quit hook runs on Godot's game/render thread. Return to the hbloader
-    // from this original NRO entry thread instead of calling an exit routine
-    // from a worker thread. Bypass __appExit(): Godot/NVK cleanup can deadlock.
-    debugPrintf("== Exit requested by game; main thread returning to homebrew loader ==\n");
+    // Stop the wrapper-owned threads first. The game quit hook only sets the
+    // flag; the current e_step() call must return before the loaded NRO can be
+    // torn down by any exit path.
+    debugPrintf("== Exit requested by game; stopping wrapper threads ==\n");
     s_game_running = 0;
     s_ithread_run = 0;
 
+    if (s_game_thread.handle) {
+      debugPrintf("[exit] waiting for game thread\n");
+      threadWaitForExit(&s_game_thread);
+      threadClose(&s_game_thread);
+      s_game_thread.handle = 0;
+      debugPrintf("[exit] game thread stopped\n");
+    }
+    if (s_ithread.handle) {
+      debugPrintf("[exit] waiting for input thread\n");
+      threadWaitForExit(&s_ithread);
+      threadClose(&s_ithread);
+      debugPrintf("[exit] input thread stopped\n");
+    }
+
+    // Normal __libnx_exit() starts with __appExit(), which unmounts fsdev,
+    // tears down HID/time/SM and calls appletExit(). On this wrapper the Godot
+    // worker/driver state can make that cleanup hang. Use only libnx's applet
+    // self-exit handshake: in mode 1 appletExit() installs _appletExitProcess
+    // as the exit callback and returns; __nx_exit() then jumps to that callback.
+    extern u32 __nx_applet_exit_mode;
     extern void NX_NORETURN __nx_exit(Result rc, LoaderReturnFn retaddr);
+
+    __nx_applet_exit_mode = 1;
+    debugPrintf("[exit] applet self-exit handshake (mode=1)\n");
+    appletExit();
+
     LoaderReturnFn retaddr = envGetExitFuncPtr();
-    debugPrintf("[exit] loader return=%p\n", (void *)retaddr);
+    debugPrintf("[exit] exit callback=%p\n", (void *)retaddr);
     if (retaddr) {
       __nx_exit(0, retaddr);
     }
 
-    debugPrintf("[exit] loader return callback is NULL; forcing process exit\n");
+    // This should only be reachable for an NSO/non-applet environment.
+    debugPrintf("[exit] no exit callback after appletExit; svcExitProcess()\n");
     svcExitProcess();
   }
 
