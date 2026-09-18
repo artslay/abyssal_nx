@@ -388,6 +388,8 @@ struct Rdr {
 
 struct CP { int tag=0; std::variant<std::monostate,int64_t,double,std::string,uint16_t,std::pair<uint16_t,uint16_t>> v; };
 
+struct Member {uint16_t flags=0;std::map<std::string,std::vector<uint8_t>> attrs;};
+
 struct ClassData {
   std::vector<CP> pool;
   std::map<std::pair<std::string,std::string>,Member> fields,methods;
