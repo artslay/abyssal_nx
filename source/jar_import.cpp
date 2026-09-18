@@ -891,7 +891,8 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
         obj->f["text_id:I"]=int64_t(as_i(args[0]));
         obj->f["speaker:I"]=int64_t(as_i(args[1]));
         obj->f["kind:I"]=int64_t(as_i(args[2]));
-        obj->f["values"]=args[3];
+        if(std::holds_alternative<std::shared_ptr<Arr>>(args[3])) obj->f["values"]=args[3];
+        else {auto values=std::make_shared<Arr>();values->v.push_back(args[3]);obj->f["values"]=Val(values);}
       }
       return {};
     }
@@ -929,7 +930,7 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
       if(std::get<0>(kv.first)!=owner)continue;
       std::string d=std::get<2>(kv.first);
       bool allowed=(d=="I"||d=="S"||d=="B"||d=="Z"||d=="J"||d=="F"||d=="D"||d=="C"||d=="Ljava/lang/String;"||(!d.empty()&&d[0]=='['));
-      if(allowed)o->v[std::get<1>(kv.first)+":"+desc_type(d)]=val_json(kv.second);
+      if(allowed&&!is_null(kv.second))o->v[std::get<1>(kv.first)+":"+desc_type(d)]=val_json(kv.second);
     }
     constants->v[owner]=jo(o);
   }
