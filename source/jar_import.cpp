@@ -799,6 +799,16 @@ static bool safe_name(const std::string &n){
   for(char c:n)if(allowed.find(c)==std::string::npos)return false;
   size_t p=0;while(true){size_t q=n.find('/',p);std::string part=n.substr(p,q==std::string::npos?n.size()-p:q-p);if(part.empty()||part=="."||part=="..")return false;if(q==std::string::npos)break;p=q+1;}return true;
 }
+static bool pack_name(const std::string &n){
+  if(n.empty()||n[0]=='/'||n.find('\\')!=std::string::npos||n.find(':')!=std::string::npos)return false;
+  static const std::string allowed="abcdefghijklmnopqrstuvwxyz0123456789_./-";
+  for(char c:n)if(allowed.find(c)==std::string::npos)return false;
+  size_t p=0;while(true){size_t q=n.find('/',p);std::string part=n.substr(p,q==std::string::npos?n.size()-p:q-p);if(part.empty()||part=="."||part=="..")return false;if(q==std::string::npos)break;p=q+1;}
+  if(n=="pack.json"||n=="native-data.json"||n=="resource_registry.json"||n=="bindings.json")return true;
+  if(n.rfind("data/",0)!=0)return false;
+  size_t dot=n.find_last_of('.');std::string ext=dot==std::string::npos?"":n.substr(dot+1);
+  return ext!="gd"&&ext!="gdc"&&ext!="tscn"&&ext!="tres"&&ext!="pck"&&ext!="class"&&ext!="jar"&&ext!="exe"&&ext!="dll"&&ext!="so"&&ext!="py"&&ext!="js";
+}
 static void write_bin(const std::string &path,const std::vector<uint8_t>&d){mkdir_recursive(dirname_of(path));FILE*f=fopen(path.c_str(),"wb");if(!f)fail("Cannot create "+path);wrbytes(f,d.data(),d.size());fclose(f);}
 static std::string read_text(const std::string &path){auto d=read_all(path);return std::string(reinterpret_cast<const char*>(d.data()),d.size());}
 
