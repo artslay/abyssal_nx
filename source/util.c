@@ -13,6 +13,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include "util.h"
 #include "config.h"
@@ -38,12 +39,25 @@ static void deinitNxLink(void) {
   }
 }
 
+static FILE *open_log_truncated(const char *path) {
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  if (fd < 0) return NULL;
+  FILE *f = fdopen(fd, "w");
+  if (!f) {
+    close(fd);
+    return NULL;
+  }
+  return f;
+}
+
 // sdmc is mounted by the time userAppInit runs, so open the log once here
 // instead of reopening it per line (the engine logs thousands of lines).
+// O_TRUNC is explicit so every launch starts with a fresh log even if stdio
+// handling changes elsewhere in the wrapper.
 void userAppInit(void) {
   initNxLink();
-  s_log = fopen(LOG_PATH, "w");
-  if (!s_log) s_log = fopen(LOG_NAME, "w"); // fall back to the launch CWD
+  s_log = open_log_truncated(LOG_PATH);
+  if (!s_log) s_log = open_log_truncated(LOG_NAME); // fall back to the launch CWD
   if (s_log) {
     fputs("== galaxian log open ==\n", s_log);
     fflush(s_log);
