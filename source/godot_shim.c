@@ -319,7 +319,6 @@ int __android_log_vprint_fake(int prio, const char *tag, const char *fmt, va_lis
 #if DEBUG_LOG
   char buf[0x800];
   vsnprintf(buf, sizeof(buf), fmt, va);
-  if (godot_log_drop(buf)) return 0;
   debugPrintf("[%s] %s\n", tag ? tag : "", buf);
 #else
   (void)tag; (void)fmt; (void)va;
@@ -330,7 +329,6 @@ int __android_log_vprint_fake(int prio, const char *tag, const char *fmt, va_lis
 int android_log_write_fake(int prio, const char *tag, const char *msg) {
   (void)prio;
 #if DEBUG_LOG
-  if (godot_log_drop(msg)) return 0;
   debugPrintf("[%s] %s\n", tag ? tag : "", msg ? msg : "");
 #else
   (void)tag; (void)msg;
