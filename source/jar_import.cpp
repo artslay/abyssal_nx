@@ -908,7 +908,7 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
 
   auto registry=jarr();auto binds=jobj();
   for(auto&m:models){
-    auto o=jobj();o->v["id"]=ji(m.id);o->v["model"]=js(m.model);
+    auto o=jobj();o->v["id"]=ji(m.id);o->v["model"]=js(m.model);o->v["texture_id"]=ji(m.texture_id);
     auto ts=jarr();ts->v.push_back(js(m.texture));o->v["textures"]=ja(ts);
     registry->v.push_back(jo(o));binds->v[m.model]=ja(ts);
   }
