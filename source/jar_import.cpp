@@ -671,8 +671,8 @@ normals.insert(normals.end(),{xx,y,z});}else{x=(x&64)?x-128:x;int y=r.bits(7,tru
   auto polygon=[&](const std::vector<int>&ind,const std::vector<int>&attr,int material,int face){
     for(int i:ind)if(i<0||i>=nv)fail("Vertex index outside model");
     Poly p;p.texture=face;p.blend=material&6;p.double_sided=bool(material&16);
-    if(ind.size()==3){p.indices=ind;p.attr=attr;}
-    else {int order[]={0,1,2,2,1,3};for(int q:order)p.indices.push_back(ind[q]);for(int q:order)for(int k=0;k<5;++k)p.attr.push_back(attr[q*5+k]);}
+    if(ind.size()==3){p.indices=ind;for(int v:attr)p.attr.push_back(v&255);}
+    else {int order[]={0,1,2,2,1,3};for(int q:order)p.indices.push_back(ind[q]);for(int q:order)for(int k=0;k<5;++k)p.attr.push_back(attr[q*5+k]&255);}
     return p;
   };
   std::vector<Poly> colored,textured;
@@ -683,7 +683,7 @@ normals.insert(normals.end(),{xx,y,z});}else{x=(x&64)?x-128:x;int y=r.bits(7,tru
       else{m=r.bits(mb);if(m&(pf==2?0xFF88:0xFC08))fail("Invalid material");for(int &x:ind)x=r.bits(ib);for(int j=0;j<cnt;++j)attr.insert(attr.end(),{int(r.bits(uv)),int(r.bits(uv)),(m&32)>>5,(m&64)>>6,m&1});}
       Poly p=polygon(ind,attr,m,-1);p.attr=attr;textured.push_back(std::move(p));
     }}
-  r.align();std::array<int,4> cursor={0,c3,0,t3};for(size_t pi=0;pi<patterns.size();++pi){int pat=pi==0?0:int(1u<<(pi%32));for(int face=0;face<2;++face)for(int kind=0;kind<2;++kind){int count=patterns[pi][face][kind],slot=kind+(face?2:0);for(int q=0;q<count;++q){std::vector<Poly>*arr=face?&textured:&colored;if(cursor[slot]>=int(arr->size()))fail("Invalid pattern counts");(*arr)[cursor[slot]].pattern=pat;if(face)(*arr)[cursor[slot]].texture=face-1;cursor[slot]++;}}}
+  r.align();std::array<int,4> cursor={0,c3,0,t3};for(size_t pi=0;pi<patterns.size();++pi){int32_t pat=pi==0?0:int32_t(uint32_t(1u<<(pi%32)));for(int face=0;face<2;++face)for(int kind=0;kind<2;++kind){int count=patterns[pi][face][kind],slot=kind+(face?2:0);for(int q=0;q<count;++q){std::vector<Poly>*arr=face?&textured:&colored;if(cursor[slot]>=int(arr->size()))fail("Invalid pattern counts");(*arr)[cursor[slot]].pattern=pat;if(face)(*arr)[cursor[slot]].texture=face-1;cursor[slot]++;}}}
   struct Bone{int vertices=0,parent=-1;std::vector<double> matrix;};std::vector<Bone>bones;for(int i=0;i<nb;++i){Bone b;b.vertices=r.u16();b.parent=r.s16();if(b.parent<-1||b.parent>=i)fail("Invalid bone parent");b.matrix=r.matrix();bones.push_back(std::move(b));}int sum=0;for(auto &b:bones)sum+=b.vertices;if(sum!=nv)fail("Invalid bone vertex blocks");
   std::vector<double> geometry;
   if(nv>0){
@@ -721,7 +721,7 @@ normals.insert(normals.end(),{xx,y,z});}else{x=(x&64)?x-128:x;int y=r.bits(7,tru
 }
 
 static Json micro_animation(const std::vector<uint8_t>&data){
-  Bits r(data);int version=r.header("MT"),actions=r.u16(),nb=r.u16();r.p+=20;if(actions>256||nb>256)fail("Animation exceeds limits");
+  Bits r(data);int version=r.header("MT"),actions=r.u16(),nb=r.u16();r.take(20);if(actions>256||nb>256)fail("Animation exceeds limits");
   auto ID=[](){return std::vector<double>{1,0,0,0,0,1,0,0,0,0,1,0};};
   auto sample=[&](const std::vector<std::pair<int,std::vector<double>>>&tr,int frame){if(frame>=tr.back().first)return tr.back().second;for(int i=int(tr.size())-2;i>=0;--i)if(frame>=tr[i].first){double a=double(frame-tr[i].first)/double(tr[i+1].first-tr[i].first);std::vector<double>v;for(size_t j=0;j<tr[i].second.size();++j)v.push_back(tr[i].second[j]+(tr[i+1].second[j]-tr[i].second[j])*a);return v;}return std::vector<double>(tr[0].second.size(),0);};
   auto track=[&](int width=3,double factor=1.0){int count=r.u16();if(count<1||count>4096)fail("Invalid animation track");std::vector<std::pair<int,std::vector<double>>> v;for(int i=0;i<count;++i){int key=r.u16();std::vector<double>x;for(int j=0;j<width;++j)x.push_back(r.s16()*factor);if(i&&v.back().first>=key)fail("Unsorted animation track");v.push_back({key,x});}return v;};
@@ -833,8 +833,10 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
       }
       if(name=="append"){
         std::string left;
-        auto it=obj?obj->f.find("text"):std::map<std::string,Val>::const_iterator{};
-        if(obj&&it!=obj->f.end()&&std::holds_alternative<std::string>(it->second))left=std::get<std::string>(it->second);
+        if(obj){
+          auto it=obj->f.find("text");
+          if(it!=obj->f.end()&&std::holds_alternative<std::string>(it->second))left=std::get<std::string>(it->second);
+        }
         std::string right=args.empty()?"":val_string(args[0]);
         if(obj)obj->f["text"]=left+right;
         return obj;
