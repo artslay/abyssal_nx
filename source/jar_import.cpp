@@ -811,7 +811,7 @@ struct Evaluator {
           break;
         }
         case 182:case 183:case 184:{
-          uint16_t idx=rd16(code.data()+p);p+=2;auto [owner,name,desc]=cl.reference(idx);int n=argc_desc(desc);std::vector<Val> aa(n);for(int j=n-1;j>=0;--j){aa[j]=st.back();st.pop_back();}
+          uint16_t idx=bc_u16(code,p);auto [owner,name,desc]=cl.reference(idx);int n=argc_desc(desc);std::vector<Val> aa(n);for(int j=n-1;j>=0;--j){aa[j]=st.back();st.pop_back();}
           std::shared_ptr<Obj> obj;if(op!=184){obj=std::get<std::shared_ptr<Obj>>(st.back());st.pop_back();}
           Val ret=summary(owner,name,desc,obj,aa);if(!desc.empty()&&desc.back()!='V')st.push_back(ret);break;
         }
