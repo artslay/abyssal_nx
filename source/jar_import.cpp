@@ -740,7 +740,7 @@ static bool safe_name(const std::string &n){
 static void write_bin(const std::string &path,const std::vector<uint8_t>&d){mkdir_recursive(dirname_of(path));FILE*f=fopen(path.c_str(),"wb");if(!f)fail("Cannot create "+path);wrbytes(f,d.data(),d.size());fclose(f);}
 static std::string read_text(const std::string &path){auto d=read_all(path);return std::string(reinterpret_cast<const char*>(d.data()),d.size());}
 
-struct ModelReg {int id;std::string model,texture;};
+struct ModelReg {int id;std::string model,texture;int texture_id=-1;};
 
 static std::vector<std::string> split(const std::string&s,char c){std::vector<std::string>o;size_t p=0;while(true){size_t q=s.find(c,p);o.push_back(s.substr(p,q==std::string::npos?s.size()-p:q-p));if(q==std::string::npos)break;p=q+1;}return o;}
 
@@ -833,8 +833,8 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
         textures[int(as_i(args[0]))]=std::get<std::string>(args[1]);return {};
       }
       if(desc=="(ILjava/lang/String;II)V"||desc=="(ILjava/lang/String;I)V"){
-        ModelReg m{int(as_i(args[0])),std::get<std::string>(args[1]),""};
-        int tid=int(as_i(args.back()));if(textures.count(tid))m.texture=textures[tid];
+        int tid=int(as_i(args.back()));
+        ModelReg m{int(as_i(args[0])),std::get<std::string>(args[1]),"",tid};
         models.push_back(std::move(m));return {};
       }
     }
@@ -888,6 +888,8 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
 
   for(auto &m:models){
     if(!m.model.empty()&&m.model[0]=='/')m.model.erase(m.model.begin());
+    auto ti=textures.find(m.texture_id);if(ti==textures.end())fail("Missing registered texture");
+    m.texture=ti->second;
     if(!m.texture.empty()&&m.texture[0]=='/')m.texture.erase(m.texture.begin());
     m.model+=".mbac";m.texture+=".bmp";
     if(!file_exists(root+"/"+m.model)||!file_exists(root+"/"+m.texture))
