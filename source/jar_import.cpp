@@ -439,6 +439,13 @@ struct Obj {std::string type;std::map<std::string,Val> f;};
 struct Arr {std::vector<Val> v;};
 
 static bool is_null(const Val &v){return std::holds_alternative<std::monostate>(v);}
+static bool same_ref(const Val&a,const Val&b){
+  if(std::holds_alternative<std::monostate>(a)||std::holds_alternative<std::monostate>(b))
+    return std::holds_alternative<std::monostate>(a)&&std::holds_alternative<std::monostate>(b);
+  if(auto x=std::get_if<std::shared_ptr<Obj>>(&a))return std::holds_alternative<std::shared_ptr<Obj>>(b)&&*x==std::get<std::shared_ptr<Obj>>(b);
+  if(auto x=std::get_if<std::shared_ptr<Arr>>(&a))return std::holds_alternative<std::shared_ptr<Arr>>(b)&&*x==std::get<std::shared_ptr<Arr>>(b);
+  return false;
+}
 static int64_t as_i(const Val &v){if(auto p=std::get_if<int64_t>(&v))return *p;if(auto p=std::get_if<bool>(&v))return *p?1:0;if(auto p=std::get_if<double>(&v))return int64_t(*p);fail("Expected number");return 0;}
 static double as_d(const Val &v){if(auto p=std::get_if<double>(&v))return *p;if(auto p=std::get_if<int64_t>(&v))return double(*p);fail("Expected number");return 0;}
 static bool veq(const Val &a,const Val &b){
@@ -531,7 +538,7 @@ struct Evaluator {
         case 116:st.back()=Val(-as_i(st.back()));break;
         case 132:{uint8_t i=code[p++];int8_t c=int8_t(code[p++]);local[i]=Val(as_i(local[i])+c);break;}
         case 133:case 134:case 135:case 136:case 139:case 142:{Val a=st.back();st.pop_back();if(op==134||op==135)st.emplace_back(as_d(a));else st.emplace_back(as_i(a));break;}
-        case 145:{int64_t a=as_i(st.back());st.back()=Val((a%256+256)%256);break;}
+        case 145:{int64_t a=as_i(st.back());st.back()=Val((a+128)%256-128);break;}
         case 146:{int64_t a=as_i(st.back());st.back()=Val((a%65536+65536)%65536);break;}
         case 147:{int64_t a=as_i(st.back());int64_t v=(a+32768)%65536-32768;st.back()=Val(v);break;}
         case 153:case 154:case 155:case 156:case 157:case 158:case 159:case 160:case 161:case 162:case 163:case 164:{
@@ -540,7 +547,7 @@ struct Evaluator {
           else {int64_t av=as_i(a),bv=as_i(b);c=(k==0?av==bv:k==1?av!=bv:k==2?av<bv:k==3?av>=bv:k==4?av>bv:av<=bv);}
           if(c)branch(off);break;
         }
-        case 165:case 166:{int16_t off=i16(code,p);Val b=st.back();st.pop_back();Val a=st.back();st.pop_back();if((veq(a,b))==(op==165))branch(off);break;}
+        case 165:case 166:{int16_t off=i16(code,p);Val b=st.back();st.pop_back();Val a=st.back();st.pop_back();if(same_ref(a,b)==(op==165))branch(off);break;}
         case 167:branch(i16(code,p));break;
         case 170:case 171:{
           while(p%4)p++;int32_t fallback=i32(code,p);int64_t key=as_i(st.back());st.pop_back();int32_t chosen=fallback;
