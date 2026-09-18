@@ -657,6 +657,7 @@ struct Bits {
   uint16_t u16(){if(p+2>d.size())fail("Truncated Micro3D resource");uint16_t v=rd16(d.data()+p);p+=2;return v;}
   int16_t s16(){return int16_t(u16());}
   int32_t i32(){if(p+4>d.size())fail("Truncated Micro3D resource");int32_t v=int32_t(rd32(d.data()+p));p+=4;return v;}
+  void skip(size_t n){if(p+n>d.size())fail("Truncated Micro3D resource");p+=n;}
   uint32_t bits(int n,bool sign=false){if(n<0||n>32)fail("Invalid bit width");while(cached<n){cache|=uint32_t(u8())<<cached;cached+=8;}uint32_t v=cache&((n==32)?0xffffffffu:((1u<<n)-1));cache>>=n;cached-=n;return sign&&n&&(v&(1u<<(n-1)))?v-(1u<<n):v;}
   void align(){cache=0;cached=0;}
   std::vector<double> matrix(){std::vector<double> m(12);for(int i=0;i<12;++i)m[i]=double(s16())*(i%4==3?1.0:1.0/4096.0);return m;}
@@ -758,7 +759,7 @@ normals.insert(normals.end(),{xx,y,z});}else{x=(x&64)?x-128:x;int y=r.bits(7,tru
 }
 
 static Json micro_animation(const std::vector<uint8_t>&data){
-  Bits r(data);int version=r.header("MT"),actions=r.u16(),nb=r.u16();r.take(20);if(actions>256||nb>256)fail("Animation exceeds limits");
+  Bits r(data);int version=r.header("MT"),actions=r.u16(),nb=r.u16();r.skip(20);if(actions>256||nb>256)fail("Animation exceeds limits");
   auto ID=[](){return std::vector<double>{1,0,0,0,0,1,0,0,0,0,1,0};};
   auto sample=[&](const std::vector<std::pair<int,std::vector<double>>>&tr,int frame){if(frame>=tr.back().first)return tr.back().second;for(int i=int(tr.size())-2;i>=0;--i)if(frame>=tr[i].first){double a=double(frame-tr[i].first)/double(tr[i+1].first-tr[i].first);std::vector<double>v;for(size_t j=0;j<tr[i].second.size();++j)v.push_back(tr[i].second[j]+(tr[i+1].second[j]-tr[i].second[j])*a);return v;}return std::vector<double>(tr[0].second.size(),0);};
   auto track=[&](int width=3,double factor=1.0){int count=r.u16();if(count<1||count>4096)fail("Invalid animation track");std::vector<std::pair<int,std::vector<double>>> v;for(int i=0;i<count;++i){int key=r.u16();std::vector<double>x;for(int j=0;j<width;++j)x.push_back(r.s16()*factor);if(i&&v.back().first>=key)fail("Unsorted animation track");v.push_back({key,x});}return v;};
