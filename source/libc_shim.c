@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <string.h>
+#include <strings.h>
 #include <math.h>
 #include <errno.h>
 #include <fcntl.h>
