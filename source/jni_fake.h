@@ -12,6 +12,8 @@ extern volatile int jni_quit_requested;
 
 void jni_init(void);
 
+void jni_set_keyboard_callback(void (*cb)(int keycode, int unicode, int key_label, int pressed, int echo));
+
 // class object handed to the GodotLib native entry points
 void *jni_activity_class(void);
 void *jni_activity_object(void);
