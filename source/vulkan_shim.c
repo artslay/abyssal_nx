@@ -101,6 +101,21 @@ shim_vkCreateInstance(const VkInstanceCreateInfo *info,
 }
 
 // --- proc address ------------------------------------------------------------
+// NVK on Switch can hang inside vkDestroyInstance during normal Godot
+// shutdown while its C11 worker threads are being joined. At this point the
+// whole Switch process is exiting anyway, so deliberately leave the Vulkan
+// instance allocated and let __libnx_exit() tear the process down. This keeps
+// Godot's normal cleanup path from blocking on the driver.
+//
+// Important: do NOT suppress this during normal rendering; it is only safe here
+// because no further Vulkan work is submitted after the engine begins exit.
+static VKAPI_ATTR void VKAPI_CALL
+shim_vkDestroyInstance(VkInstance inst, const VkAllocationCallbacks *alloc) {
+  (void)inst;
+  (void)alloc;
+  debugPrintf("[vk] vkDestroyInstance suppressed during Switch process exit\n");
+}
+
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 shim_vkGetDeviceProcAddr(VkDevice dev, const char *name) {
   if (name && !strcmp(name, "vkGetDeviceProcAddr"))
@@ -114,6 +129,7 @@ shim_vkGetInstanceProcAddr(VkInstance inst, const char *name) {
   if (!strcmp(name, "vkCreateAndroidSurfaceKHR"))               return (PFN_vkVoidFunction)shim_vkCreateAndroidSurfaceKHR;
   if (!strcmp(name, "vkEnumerateInstanceExtensionProperties"))  return (PFN_vkVoidFunction)shim_vkEnumerateInstanceExtensionProperties;
   if (!strcmp(name, "vkCreateInstance"))                        return (PFN_vkVoidFunction)shim_vkCreateInstance;
+  if (!strcmp(name, "vkDestroyInstance"))                       return (PFN_vkVoidFunction)shim_vkDestroyInstance;
   if (!strcmp(name, "vkGetInstanceProcAddr"))                   return (PFN_vkVoidFunction)shim_vkGetInstanceProcAddr;
   if (!strcmp(name, "vkGetDeviceProcAddr"))                     return (PFN_vkVoidFunction)shim_vkGetDeviceProcAddr;
   return vkGetInstanceProcAddr(inst, name);
@@ -126,6 +142,7 @@ void *vulkan_shim_find(const char *symbol) {
   if (!symbol) return NULL;
   if (!strcmp(symbol, "vkGetInstanceProcAddr"))                  return (void *)&shim_vkGetInstanceProcAddr;
   if (!strcmp(symbol, "vkCreateInstance"))                       return (void *)&shim_vkCreateInstance;
+  if (!strcmp(symbol, "vkDestroyInstance"))                      return (void *)&shim_vkDestroyInstance;
   if (!strcmp(symbol, "vkEnumerateInstanceExtensionProperties")) return (void *)&shim_vkEnumerateInstanceExtensionProperties;
   if (!strcmp(symbol, "vkCreateAndroidSurfaceKHR"))              return (void *)&shim_vkCreateAndroidSurfaceKHR;
   if (!strncmp(symbol, "vk", 2)) {
