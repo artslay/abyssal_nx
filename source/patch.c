@@ -79,24 +79,21 @@ typedef struct { uint32_t repl_word; uint32_t expect; uintptr_t vaddr; void *rep
 // callback arrives too late. Catch the quit request at its source and terminate
 // the Switch process immediately, matching Android's force-quit behavior.
 static void switch_scene_tree_quit(int p_exit_code) {
-  debugPrintf("[patch] SceneTree::quit(%d) -> returning to homebrew loader\n", p_exit_code);
-  // Keep libnx's normal NRO exit mode (0). __libnx_exit() performs the regular
-  // service cleanup and then __nx_exit() restores the original crt0 stack and
-  // branches to the return address supplied by hbloader.
-  extern u32 __nx_applet_exit_mode;
-  extern void NX_NORETURN __libnx_exit(int rc);
-  __nx_applet_exit_mode = 0;
-  __libnx_exit(p_exit_code);
+  // Do not leave the Godot render/game thread through __nx_exit(): hbloader's
+  // return callback belongs to the original NRO entry thread. Just signal the
+  // main wrapper thread; it will perform the direct loader return outside
+  // Godot's cleanup path.
+  extern volatile int jni_quit_requested;
+  jni_quit_requested = 1;
+  debugPrintf("[patch] SceneTree::quit(%d) -> quit flag set for main thread\n", p_exit_code);
 }
 
 // Fallback for engine builds where SceneTree::quit() is not present in the
 // dynamic symbol table: SceneTree::quit() always sets OS::set_exit_code() first.
 static void switch_os_set_exit_code(int p_exit_code) {
-  debugPrintf("[patch] OS::set_exit_code(%d) -> returning to homebrew loader\n", p_exit_code);
-  extern u32 __nx_applet_exit_mode;
-  extern void NX_NORETURN __libnx_exit(int rc);
-  __nx_applet_exit_mode = 0;
-  __libnx_exit(p_exit_code);
+  extern volatile int jni_quit_requested;
+  jni_quit_requested = 1;
+  debugPrintf("[patch] OS::set_exit_code(%d) -> quit flag set for main thread\n", p_exit_code);
 }
 
 
