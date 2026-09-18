@@ -1122,7 +1122,7 @@ static void validate_generated_pack(const std::string &pack,const std::string &r
     uint16_t nl=rd16(raw.data()+p+28),el=rd16(raw.data()+p+30),cl=rd16(raw.data()+p+32);
     if(flags&1||method!=0||expanded>32u*1024u*1024u||p+46+nl+el+cl>end)fail("Generated content pack has an unsupported entry");
     std::string name(reinterpret_cast<const char*>(raw.data()+p+46),nl);
-    if(!safe_name(name))fail("Generated content pack contains an unsafe entry");
+    if(!pack_name(name))fail("Generated content pack contains an unsafe entry");
     if(name=="pack.json")have_pack=true;else if(name=="native-data.json")have_native=true;else if(name=="resource_registry.json")have_registry=true;else if(name=="bindings.json")have_bindings=true;
     p+=46+nl+el+cl;
   }
@@ -1140,7 +1140,7 @@ static void validate_generated_pack(const std::string &pack,const std::string &r
 static void build_pack(const std::string&root,const std::string&jar_sha,const std::string&pack){
   std::vector<std::string> names={"native-data.json","resource_registry.json","bindings.json"};std::vector<std::string>all;collect_files(root+"/data","data",all);names.insert(names.end(),all.begin(),all.end());
   std::vector<PackItem> items;auto man=jobj();man->v["format"]=js("abyssal-content-1");man->v["profile"]=js(jar_sha);auto files=jobj();
-  for(auto&name:names){if(name.size()>=4){std::string e=name.substr(name.find_last_of('.')+1);if(e=="amr"||e=="mid")continue;}std::vector<uint8_t>d=read_all(root+"/"+name,32u*1024u*1024u);if(d.size()>32u*1024u*1024u)fail("Decoded content exceeds limits");auto rec=jobj();rec->v["size"]=ji(int64_t(d.size()));rec->v["sha256"]=js(sha256(d));files->v[name]=jo(rec);items.push_back({name,std::move(d),0,0});}
+  for(auto&name:names){if(!pack_name(name))fail("Non-resource entry in content pack: "+name);if(name.size()>=4){std::string e=name.substr(name.find_last_of('.')+1);if(e=="amr"||e=="mid")continue;}std::vector<uint8_t>d=read_all(root+"/"+name,32u*1024u*1024u);if(d.size()>32u*1024u*1024u)fail("Decoded content exceeds limits");auto rec=jobj();rec->v["size"]=ji(int64_t(d.size()));rec->v["sha256"]=js(sha256(d));files->v[name]=jo(rec);items.push_back({name,std::move(d),0,0});}
   man->v["files"]=jo(files);std::string ms=json_string(jo(man));items.insert(items.begin(),PackItem{"pack.json",std::vector<uint8_t>(ms.begin(),ms.end()),0,0});if(items.size()>4096)fail("Too many decoded resources");write_zip_stored(pack,std::move(items));
 }
 
@@ -1149,7 +1149,7 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
   try{
     long size=0;FILE*f=fopen(jar_path,"rb");if(!f)fail("Cannot open JAR");fseek(f,0,SEEK_END);size=ftell(f);fclose(f);if(size<0||size>16*1024*1024)fail("JAR exceeds 16 MiB.");
     std::string digest=sha256_file(jar_path);std::string base=std::string(cache_root)+"/_jar_import_v3";std::string pack=base+"/"+digest+".abyss";
-    if(!file_exists(pack)){std::string work=base+"/"+digest+".work";remove_tree(work);mkdir_recursive(work);extract_jar(jar_path,work);build_pack(work,digest,pack);validate_generated_pack(pack,work,digest);remove_tree(work);}
+    if(!file_exists(pack)){debugPrintf("[jar] cache miss: %s\n",pack.c_str());std::string work=base+"/"+digest+".work";remove_tree(work);mkdir_recursive(work);extract_jar(jar_path,work);build_pack(work,digest,pack);validate_generated_pack(pack,work,digest);remove_tree(work);}else debugPrintf("[jar] cache hit: %s\n",pack.c_str());
     if(!file_exists(pack))fail("Native JAR converter did not create a content pack");
     if(pack.size()+1>out_size)fail("Converted pack path is too long");
     snprintf(out,out_size,"%s",pack.c_str());
