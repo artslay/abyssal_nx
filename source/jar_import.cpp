@@ -2,6 +2,8 @@
 
 #include "jar_import.h"
 
+extern "C" void debugPrintf(const char *fmt, ...);
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -17,6 +19,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <tuple>
+#include <unistd.h>
 #include <utility>
 #include <variant>
 #include <vector>
