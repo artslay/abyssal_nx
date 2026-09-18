@@ -361,7 +361,6 @@ static struct { u64 sw; int btn; } s_btnmap[] = {
 };
 
 static u64 s_prev_buttons = 0;
-static int s_touching = 0;
 static float s_prev_axis[6] = { 99, 99, 99, 99, 99, 99 }; // force initial send
 
 // Input is polled on the game thread right before e_step(). When e_step stalls
@@ -463,38 +462,261 @@ static void poll_input(void) {
 
   // Single-finger touchscreen. Godot Android expects 6 floats per pointer:
   // id, x, y, pressure, tilt_x, tilt_y.
-  if (e_dispatchTouchEvent) {
-    HidTouchScreenState ts = {0};
-    const int have = hidGetTouchScreenStates(&ts, 1) && ts.count > 0;
-    if (have || s_touching) {
-      float x = 0.0f, y = 0.0f;
-      float id = 0.0f;
-      float pressure = 0.0f;
-      float tilt_x = 0.0f, tilt_y = 0.0f;
+// Touchscreen -> Godot Android touch events.
+// libnx supports up to 16 simultaneous fingers.
+// Godot expects 6 floats per pointer:
+// id, x, y, pressure, tilt_x, tilt_y.
+if (e_dispatchTouchEvent) {
+  HidTouchScreenState ts = {0};
+
+  const int have =
+    hidGetTouchScreenStates(&ts, 1) && ts.count > 0;
+
+  /*
+   * Previous frame's active fingers.
+   * We keep the full state because ACTION_POINTER_UP must
+   * identify a finger which may already be absent from the
+   * current Switch touch sample.
+   */
+  static HidTouchState prev_touches[16];
+  static int prev_count = 0;
+
+  /*
+   * Convert one Switch touch into Godot's 6-float format.
+   */
+  float pos[16 * 6];
+
+  /*
+   * First touch of a gesture.
+   */
+  if (prev_count == 0 && have) {
+    for (int i = 0; i < ts.count; i++) {
+      pos[i * 6 + 0] = (float)ts.touches[i].finger_id;
+      pos[i * 6 + 1] =
+        (float)ts.touches[i].x *
+        screen_width / 1280.0f;
+      pos[i * 6 + 2] =
+        (float)ts.touches[i].y *
+        screen_height / 720.0f;
+      pos[i * 6 + 3] = 1.0f;
+      pos[i * 6 + 4] = 0.0f;
+      pos[i * 6 + 5] = 0.0f;
+    }
+
+    void *arr =
+      jni_new_float_array(ts.count * 6, pos);
+
+    e_dispatchTouchEvent(
+      fake_env,
+      cls,
+      0,                  /* ACTION_DOWN */
+      (int)ts.touches[0].finger_id,
+      ts.count,
+      arr,
+      0
+    );
+
+    jni_release_local(arr);
+  }
+
+  /*
+   * Fingers were already active.
+   * First detect removed fingers.
+   */
+  if (prev_count > 0) {
+    for (int p = 0; p < prev_count; p++) {
+      const u32 old_id =
+        prev_touches[p].finger_id;
+
+      int still_present = 0;
 
       if (have) {
-        id = (float)ts.touches[0].finger_id;
-        x = (float)ts.touches[0].x * screen_width  / 1280.0f;
-        y = (float)ts.touches[0].y * screen_height / 720.0f;
-        pressure = 1.0f;
+        for (int i = 0; i < ts.count; i++) {
+          if (ts.touches[i].finger_id == old_id) {
+            still_present = 1;
+            break;
+          }
+        }
       }
 
-      float pos[6] = { id, x, y, pressure, tilt_x, tilt_y };
-      void *arr = jni_new_float_array(6, pos);
+      if (!still_present) {
+        /*
+         * Last finger -> ACTION_UP.
+         * More than one finger -> ACTION_POINTER_UP.
+         */
+        const int last_removed =
+          (prev_count == 1);
 
-      if (have && !s_touching) {
-        e_dispatchTouchEvent(fake_env, cls, 0 /* ACTION_DOWN */, (int)id, 1, arr, 0);
-        s_touching = 1;
-      } else if (have) {
-        e_dispatchTouchEvent(fake_env, cls, 2 /* ACTION_MOVE */, (int)id, 1, arr, 0);
-      } else {
-        e_dispatchTouchEvent(fake_env, cls, 1 /* ACTION_UP */, 0, 1, arr, 0);
-        s_touching = 0;
+        const int action =
+          last_removed ? 1 : 6;
+
+        /*
+         * For POINTER_UP Godot wants the pointer id
+         * of the released finger. For ACTION_UP it ignores
+         * the pointer argument.
+         */
+        const int pointer =
+          (int)old_id;
+
+        /*
+         * Android/Godot's touch handler only needs the released
+         * pointer for POINTER_UP, but sending the previous full
+         * set is safest because it preserves its old position.
+         */
+        int count_for_event = prev_count;
+
+        for (int i = 0; i < prev_count; i++) {
+          pos[i * 6 + 0] =
+            (float)prev_touches[i].finger_id;
+
+          pos[i * 6 + 1] =
+            (float)prev_touches[i].x *
+            screen_width / 1280.0f;
+
+          pos[i * 6 + 2] =
+            (float)prev_touches[i].y *
+            screen_height / 720.0f;
+
+          pos[i * 6 + 3] = 1.0f;
+          pos[i * 6 + 4] = 0.0f;
+          pos[i * 6 + 5] = 0.0f;
+        }
+
+        void *arr =
+          jni_new_float_array(
+            count_for_event * 6,
+            pos
+          );
+
+        e_dispatchTouchEvent(
+          fake_env,
+          cls,
+          action,
+          pointer,
+          count_for_event,
+          arr,
+          0
+        );
+
+        jni_release_local(arr);
       }
+    }
+  }
+
+  /*
+   * Detect newly added fingers.
+   */
+  if (have) {
+    for (int n = 0; n < ts.count; n++) {
+      const u32 new_id =
+        ts.touches[n].finger_id;
+
+      int was_present = 0;
+
+      for (int p = 0; p < prev_count; p++) {
+        if (prev_touches[p].finger_id == new_id) {
+          was_present = 1;
+          break;
+        }
+      }
+
+      if (!was_present) {
+        /*
+         * If there was no previous finger this was already handled
+         * by ACTION_DOWN. Otherwise this is a new pointer.
+         */
+        if (prev_count > 0) {
+          for (int i = 0; i < ts.count; i++) {
+            pos[i * 6 + 0] =
+              (float)ts.touches[i].finger_id;
+
+            pos[i * 6 + 1] =
+              (float)ts.touches[i].x *
+              screen_width / 1280.0f;
+
+            pos[i * 6 + 2] =
+              (float)ts.touches[i].y *
+              screen_height / 720.0f;
+
+            pos[i * 6 + 3] = 1.0f;
+            pos[i * 6 + 4] = 0.0f;
+            pos[i * 6 + 5] = 0.0f;
+          }
+
+          void *arr =
+            jni_new_float_array(
+              ts.count * 6,
+              pos
+            );
+
+          e_dispatchTouchEvent(
+            fake_env,
+            cls,
+            5,              /* ACTION_POINTER_DOWN */
+            (int)new_id,
+            ts.count,
+            arr,
+            0
+          );
+
+          jni_release_local(arr);
+        }
+      }
+    }
+
+    /*
+     * MOVE for every active finger.
+     */
+    if (prev_count > 0) {
+      for (int i = 0; i < ts.count; i++) {
+        pos[i * 6 + 0] =
+          (float)ts.touches[i].finger_id;
+
+        pos[i * 6 + 1] =
+          (float)ts.touches[i].x *
+          screen_width / 1280.0f;
+
+        pos[i * 6 + 2] =
+          (float)ts.touches[i].y *
+          screen_height / 720.0f;
+
+        pos[i * 6 + 3] = 1.0f;
+        pos[i * 6 + 4] = 0.0f;
+        pos[i * 6 + 5] = 0.0f;
+      }
+
+      void *arr =
+        jni_new_float_array(
+          ts.count * 6,
+          pos
+        );
+
+      e_dispatchTouchEvent(
+        fake_env,
+        cls,
+        2,                /* ACTION_MOVE */
+        0,
+        ts.count,
+        arr,
+        0
+      );
 
       jni_release_local(arr);
     }
   }
+
+  /*
+   * Save current state for the next frame.
+   */
+  if (have) {
+    prev_count = ts.count;
+
+    for (int i = 0; i < ts.count; i++)
+      prev_touches[i] = ts.touches[i];
+  } else {
+    prev_count = 0;
+  }
+}
 }
 
 // ---------------------------------------------------------------------------
