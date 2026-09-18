@@ -41,6 +41,13 @@ static uint32_t rd32(const uint8_t *p) {
   return uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
          (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 }
+static uint16_t be16(const uint8_t *p) {
+  return (uint16_t(p[0]) << 8) | uint16_t(p[1]);
+}
+static uint32_t be32(const uint8_t *p) {
+  return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) |
+         (uint32_t(p[2]) << 8) | uint32_t(p[3]);
+}
 static int16_t srd16(const uint8_t *p) { return static_cast<int16_t>(rd16(p)); }
 
 static void wr16(FILE *f, uint16_t v) {
@@ -368,8 +375,8 @@ struct Rdr {
   const std::vector<uint8_t> &d;size_t p=0;
   explicit Rdr(const std::vector<uint8_t> &x):d(x){}
   uint8_t u1(){if(p+1>d.size())fail("Truncated class data");return d[p++];}
-  uint16_t u2(){if(p+2>d.size())fail("Truncated class data");uint16_t v=rd16(d.data()+p);p+=2;return v;}
-  uint32_t u4(){if(p+4>d.size())fail("Truncated class data");uint32_t v=rd32(d.data()+p);p+=4;return v;}
+  uint16_t u2(){if(p+2>d.size())fail("Truncated class data");uint16_t v=be16(d.data()+p);p+=2;return v;}
+  uint32_t u4(){if(p+4>d.size())fail("Truncated class data");uint32_t v=be32(d.data()+p);p+=4;return v;}
   int8_t s1(){return int8_t(u1());}
   int16_t s2(){return int16_t(u2());}
   int32_t s4(){return int32_t(u4());}
