@@ -70,7 +70,13 @@ void *opendir_fake(const char *path) {
   if (!fd) { closedir(d); return NULL; }
   fd->magic = FAKEDIR_MAGIC;
   fd->dir = d;
-  strncpy(fd->path, nb, sizeof(fd->path) - 1);
+  size_t path_len = strlen(nb);
+
+if (path_len >= sizeof(fd->path))
+    path_len = sizeof(fd->path) - 1;
+
+memcpy(fd->path, nb, path_len);
+fd->path[path_len] = '\0';
   return fd;
 }
 
@@ -84,7 +90,7 @@ void *readdir_fake(void *dirp) {
   memset(&fd->ent, 0, sizeof(fd->ent));
   fd->ent.d_ino = 1;
   fd->ent.d_reclen = sizeof(fd->ent);
-  strncpy(fd->ent.d_name, e->d_name, sizeof(fd->ent.d_name) - 1);
+  snprintf(fd->ent.d_name, sizeof(fd->ent.d_name), "%s", e->d_name);
   // newlib on Switch has no d_type; stat to tell dirs from files (Godot's
   // DirAccessUnix falls back to stat when DT_UNKNOWN, but be explicit).
   char full[768];
@@ -192,7 +198,14 @@ int mkstemp_fake(char *tmpl) {
   if (l < 6) { errno = EINVAL; return -1; }
   static int counter = 0;
   for (int tries = 0; tries < 100; tries++) {
-    snprintf(tmpl + l - 6, 7, "%06d", (counter++) % 1000000);
+unsigned int value =
+    (unsigned int)(counter++ % 1000000);
+
+for (int i = 5; i >= 0; --i) {
+    tmpl[l - 6 + i] =
+        (char)('0' + (value % 10));
+    value /= 10;
+}
     int fd = open(tmpl, O_RDWR | O_CREAT | O_EXCL, 0600);
     if (fd >= 0) return fd;
   }
@@ -300,18 +313,6 @@ int truncate_fake(const char *path, int64_t len) {
 // Writing each of those (plus its backtrace) to the SD card per event tanks
 // the framerate, so drop that high-frequency noise from the log. Genuine
 // one-off engine messages and our own [wrapper] logs are kept.
-static int godot_log_drop(const char *s) {
-  if (!s) return 0;
-  if (strstr(s, "SCRIPT ERROR")) return 1;
-  if (strstr(s, "GDScript backtrace")) return 1;
-  if (strstr(s, "Unicode parsing error")) return 1;
-  if (strstr(s, "at: _input") || strstr(s, "at: _process")) return 1;
-  if (strstr(s, "landning and setting dashing")) return 1; // per-frame grounded-state debug spam
-  const char *t = s;
-  while (*t == ' ' || *t == '\t') t++;
-  if (t[0] == '[' && t[1] >= '0' && t[1] <= '9' && t[2] == ']') return 1; // backtrace frame
-  return 0;
-}
 
 int __android_log_vprint_fake(int prio, const char *tag, const char *fmt, va_list va) {
   (void)prio;

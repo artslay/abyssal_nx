@@ -311,7 +311,12 @@ static int gd_dir_open(int access_type, const char *path) {
   for (int i = 0; i < MAX_GD_DIRS; i++) {
     if (!gd_dirs[i].dir) {
       gd_dirs[i].dir = d;
-      strncpy(gd_dirs[i].path, buf, sizeof(gd_dirs[i].path) - 1);
+      snprintf(
+    gd_dirs[i].path,
+    sizeof(gd_dirs[i].path),
+    "%s",
+    buf
+);
       gd_dirs[i].current[0] = 0;
       mutexUnlock(&gd_dir_lock);
       return i + 1;
@@ -335,7 +340,12 @@ static const char *gd_dir_next(int id) {
   if (!g) return NULL;
   struct dirent *e = readdir(g->dir);
   if (!e) return NULL;
-  strncpy(g->current, e->d_name, sizeof(g->current) - 1);
+  snprintf(
+    g->current,
+    sizeof(g->current),
+    "%s",
+    e->d_name
+);
   char full[800];
   snprintf(full, sizeof(full), "%s/%s", g->path, e->d_name);
   struct stat st;
@@ -463,7 +473,12 @@ static int gd_file_open(const char *path, int mode) {
         fseek(f, 0, SEEK_SET);
         if (poolable) {
           pck_pool_size = gd_files[i].size;
-          strncpy(pck_pool_path, buf, sizeof(pck_pool_path) - 1);
+          snprintf(
+    pck_pool_path,
+    sizeof(pck_pool_path),
+    "%s",
+    buf
+);
         }
       }
       mutexUnlock(&gd_file_lock);

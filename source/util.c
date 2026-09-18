@@ -65,15 +65,6 @@ static uint8_t s_tls_block[0x1000] __attribute__((aligned(16)));
 // (tpidr_el0 == 0 -- the engine's Vulkan render/worker threads). no_stack_protector
 // so this function never reads the canary it is about to install.
 __attribute__((no_stack_protector))
-static void heal_stack_guard(void) {
-  uintptr_t tp;
-  __asm__ volatile("mrs %0, s3_3_c13_c0_2" : "=r"(tp)); // read tpidr_el0 (safe if 0)
-  if (tp) return;
-  *(volatile uint64_t *)(s_tls_block + 0x28) = 0x0123456789ABCDEFull;
-  __asm__ volatile("msr s3_3_c13_c0_2, %0" : : "r"(s_tls_block)); // set tpidr_el0
-}
-
-__attribute__((no_stack_protector))
 int debugPrintf(char *text, ...) {
 #if DEBUG_LOG
   va_list list;
