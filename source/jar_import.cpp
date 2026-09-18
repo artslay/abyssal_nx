@@ -409,7 +409,7 @@ struct ClassData {
       }
       i+=(tag==5||tag==6)?2:1;
     }
-    r.u2();name=constant_str(r.u2());uint16_t interfaces=r.u2();for(uint16_t j=0;j<interfaces;++j)r.u2();
+    r.u2();uint16_t this_class=r.u2();name=constant_str(this_class);r.u2();uint16_t interfaces=r.u2();for(uint16_t j=0;j<interfaces;++j)r.u2();
     fields=members(r);methods=members(r);auto a=attrs(r);if(r.p!=raw.size())fail("Trailing class data");(void)a;
   }
 
