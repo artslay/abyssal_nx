@@ -48,7 +48,6 @@ static uint32_t be32(const uint8_t *p) {
   return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) |
          (uint32_t(p[2]) << 8) | uint32_t(p[3]);
 }
-static int16_t srd16(const uint8_t *p) { return static_cast<int16_t>(rd16(p)); }
 
 static void wr16(FILE *f, uint16_t v) {
   uint8_t b[2] = {uint8_t(v), uint8_t(v >> 8)};
@@ -676,20 +675,6 @@ static bool same_ref(const Val&a,const Val&b){
 }
 static int64_t as_i(const Val &v){if(auto p=std::get_if<int64_t>(&v))return *p;if(auto p=std::get_if<bool>(&v))return *p?1:0;if(auto p=std::get_if<double>(&v))return int64_t(*p);fail("Expected number");return 0;}
 static double as_d(const Val &v){if(auto p=std::get_if<double>(&v))return *p;if(auto p=std::get_if<int64_t>(&v))return double(*p);fail("Expected number");return 0;}
-static bool veq(const Val &a,const Val &b){
-  if(a.index()!=b.index()){
-    if((std::holds_alternative<int64_t>(a)||std::holds_alternative<double>(a))&&
-       (std::holds_alternative<int64_t>(b)||std::holds_alternative<double>(b)))return as_d(a)==as_d(b);
-    return false;
-  }
-  if(std::holds_alternative<std::monostate>(a))return true;
-  if(auto p=std::get_if<bool>(&a))return *p==std::get<bool>(b);
-  if(auto p=std::get_if<int64_t>(&a))return *p==std::get<int64_t>(b);
-  if(auto p=std::get_if<double>(&a))return *p==std::get<double>(b);
-  if(auto p=std::get_if<std::string>(&a))return *p==std::get<std::string>(b);
-  if(auto p=std::get_if<std::shared_ptr<Obj>>(&a))return p->get()==std::get<std::shared_ptr<Obj>>(b).get();
-  return std::get<std::shared_ptr<Arr>>(a).get()==std::get<std::shared_ptr<Arr>>(b).get();
-}
 static std::string desc_type(const std::string &d){
   static const std::map<std::string,std::string> t={{"I","int"},{"S","short"},{"B","byte"},{"Z","boolean"},{"J","long"},{"F","float"},{"D","double"},{"C","char"},{"Ljava/lang/String;","java.lang.String"}};
   auto it=t.find(d);return it!=t.end()?it->second:d;
