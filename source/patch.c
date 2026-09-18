@@ -80,16 +80,14 @@ typedef struct { uint32_t repl_word; uint32_t expect; uintptr_t vaddr; void *rep
 // the Switch process immediately, matching Android's force-quit behavior.
 static void switch_scene_tree_quit(int p_exit_code) {
   debugPrintf("[patch] SceneTree::quit(%d) -> immediate Switch process exit\n", p_exit_code);
-  extern void NX_NORETURN __libnx_exit(int rc);
-  __libnx_exit(p_exit_code);
+  svcExitProcess();
 }
 
 // Fallback for engine builds where SceneTree::quit() is not present in the
 // dynamic symbol table: SceneTree::quit() always sets OS::set_exit_code() first.
 static void switch_os_set_exit_code(int p_exit_code) {
   debugPrintf("[patch] OS::set_exit_code(%d) -> immediate Switch process exit\n", p_exit_code);
-  extern void NX_NORETURN __libnx_exit(int rc);
-  __libnx_exit(p_exit_code);
+  svcExitProcess();
 }
 
 
