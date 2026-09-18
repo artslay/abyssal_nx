@@ -1287,6 +1287,19 @@ int main(void) {
     svcSleepThread(16 * 1000 * 1000);
   }
 
+  if (jni_quit_requested) {
+    // Android's real forceQuit() terminates the whole app process. Do the same
+    // on Switch instead of waiting for Godot's render/game thread to unwind:
+    // the engine may already be inside Main::cleanup(), where NVK/worker-thread
+    // teardown can block indefinitely. Waiting here would make the Exit button
+    // appear to hang forever.
+    debugPrintf("== Exit requested by game; terminating process immediately ==\n");
+    s_game_running = 0;
+    s_ithread_run = 0;
+    extern void NX_NORETURN __libnx_exit(int rc);
+    __libnx_exit(0);
+  }
+
   s_game_running = 0;
   s_ithread_run = 0;
   threadWaitForExit(&s_game_thread);
@@ -1295,9 +1308,6 @@ int main(void) {
     threadWaitForExit(&s_ithread);
   if (s_ithread.handle)
     threadClose(&s_ithread);
-
-  if (jni_quit_requested)
-    debugPrintf("== Exit requested by game; shutting down wrapper ==\n");
 
   if (s_ctx != EGL_NO_CONTEXT) {
     eglMakeCurrent(s_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
