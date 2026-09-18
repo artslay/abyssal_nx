@@ -537,10 +537,10 @@ struct Evaluator {
         case 95:std::swap(st[st.size()-1],st[st.size()-2]);break;
         case 96:case 100:case 104:case 108:case 112:case 120:case 122:case 124:case 126:case 128:case 130:{
           int64_t b=as_i(st.back());st.pop_back();int64_t a=as_i(st.back());st.pop_back();int64_t v=0;
-          if(op==96)v=a+b;else if(op==100)v=a-b;else if(op==104)v=a*b;else if(op==108)v=b?int64_t(a/b):0;
-          else if(op==112)v=b?a-int64_t(a/b)*b:0;else if(op==120)v=a<<(b&31);else if(op==122)v=a>>(b&31);
+          if(op==96)v=a+b;else if(op==100)v=a-b;else if(op==104)v=a*b;else if(op==108){if(!b)fail("Division by zero");v=int64_t(a/b);}
+          else if(op==112){if(!b)fail("Division by zero");v=a-int64_t(a/b)*b;}else if(op==120)v=a<<(b&31);else if(op==122)v=a>>(b&31);
           else if(op==124)v=int64_t(uint64_t(uint32_t(a))>>(b&31));else if(op==126)v=a&b;else if(op==128)v=a|b;else v=a^b;
-          st.emplace_back(v);break;
+          v=int64_t(int32_t(uint32_t(v)));st.emplace_back(v);break;
         }
         case 116:st.back()=Val(-as_i(st.back()));break;
         case 132:{uint8_t i=code[p++];int8_t c=int8_t(code[p++]);local[i]=Val(as_i(local[i])+c);break;}
