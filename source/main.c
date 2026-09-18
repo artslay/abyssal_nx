@@ -1298,7 +1298,7 @@ int main(void) {
     s_ithread_run = 0;
     extern u32 __nx_applet_exit_mode;
     extern void NX_NORETURN __libnx_exit(int rc);
-    __nx_applet_exit_mode = 1;
+    __nx_applet_exit_mode = 0;
     __libnx_exit(0);
   }
 
