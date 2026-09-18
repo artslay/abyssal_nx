@@ -74,7 +74,7 @@ static std::vector<uint8_t> read_all(const std::string &path, size_t limit = 128
   if (n < 0) { fclose(f); fail("Cannot stat file"); }
   if (size_t(n) > limit) { fclose(f); fail("File exceeds import limit"); }
   if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); fail("Cannot rewind file"); }
-  std::vector<uint8_t> out(size_t(n));
+  std::vector<uint8_t> out(static_cast<size_t>(n));
   if (!out.empty() && fread(out.data(), 1, out.size(), f) != out.size()) {
     fclose(f); fail("Cannot read file");
   }
@@ -354,7 +354,10 @@ static std::string mutf8(const std::vector<uint8_t> &raw) {
     if(c==0xC0 && i<raw.size() && raw[i]==0x80){++i;u.push_back(0);continue;}
     if(c<0x80){u.push_back(c);continue;}
     if((c&0xE0)==0xC0 && i<raw.size()){u.push_back(uint16_t((c&31)<<6)|(raw[i++]&63));continue;}
-    if((c&0xF0)==0xE0 && i+1<raw.size()){u.push_back(uint16_t((c&15)<<12)|((raw[i++]&63)<<6)|(raw[i++]&63));continue;}
+    if((c&0xF0)==0xE0 && i+1<raw.size()){
+      uint8_t c1=raw[i++],c2=raw[i++];
+      u.push_back(uint16_t((c&15)<<12)|((c1&63)<<6)|(c2&63));continue;
+    }
     fail("Invalid modified UTF-8");
   }
   std::string out;
@@ -421,13 +424,15 @@ struct ClassData {
     return out;
   }
   std::string constant_str(uint16_t idx)const{
-    if(idx==0||idx>=pool.size())fail("Bad constant index");const CP &c=pool[idx];
+    if(idx==0||idx>=pool.size())fail("Bad constant index");
+    const CP &c=pool[idx];
     if(c.tag==1)return std::get<std::string>(c.v);
     if(c.tag==7||c.tag==8||c.tag==16||c.tag==19||c.tag==20)return constant_str(std::get<uint16_t>(c.v));
     fail("Constant is not a string");return "";
   }
   CP constant(uint16_t idx)const{
-    if(idx==0||idx>=pool.size())fail("Bad constant index");return pool[idx];
+    if(idx==0||idx>=pool.size())fail("Bad constant index");
+    return pool[idx];
   }
   std::tuple<std::string,std::string,std::string> reference(uint16_t idx)const{
     auto p=std::get<std::pair<uint16_t,uint16_t>>(constant(idx).v);
@@ -487,11 +492,21 @@ static Val defval(const std::string &d){
   return (!d.empty()&&(d[0]=='L'||d[0]=='['))?Val(std::monostate{}):Val(int64_t(0));
 }
 static int argc_desc(const std::string &d){
-  if(d.size()<2)return 0;size_t p=1,n=0;while(p<d.size()&&d[p]!=')'){
-    if(d[p]=='['){while(p<d.size()&&d[p]=='[')++p;if(p<d.size()&&d[p]=='L'){while(p<d.size()&&d[p++]!=';');}else ++p;}
-    else if(d[p]=='L'){while(p<d.size()&&d[p++]!=';');}
-    else ++p;n++;
-  }return int(n);
+  if(d.size()<2)return 0;
+  size_t p=1,n=0;
+  while(p<d.size()&&d[p]!=')'){
+    if(d[p]=='['){
+      while(p<d.size()&&d[p]=='[')++p;
+      if(p<d.size()&&d[p]=='L')while(p<d.size()&&d[p++]!=';');
+      else if(p<d.size())++p;
+    } else if(d[p]=='L') {
+      while(p<d.size()&&d[p++]!=';');
+    } else {
+      ++p;
+    }
+    ++n;
+  }
+  return int(n);
 }
 
 using StaticMap=std::map<std::tuple<std::string,std::string,std::string>,Val>;
@@ -523,7 +538,8 @@ struct Evaluator {
     auto branch=[&](int16_t off){int64_t t=int64_t(p)-3+off;if(t<0||t>=int64_t(code.size()))fail("Invalid branch");p=size_t(t);};
     auto bit_reader=[&](std::shared_ptr<Arr> a,size_t idx)->Val{if(!a||idx>=a->v.size())fail("Invalid array access");return a->v[idx];};
     for(int step=0;step<100000;++step){
-      if(p>=code.size())fail("Method fell off end");size_t start=p;uint8_t op=code[p++];
+      if(p>=code.size())fail("Method fell off end");
+      size_t start=p;uint8_t op=code[p++];
       switch(op){
         case 0:break;
         case 1:st.emplace_back(std::monostate{});break;
@@ -562,12 +578,14 @@ struct Evaluator {
           int16_t off=i16(code,p);Val b;if(op>=159)b=st.back(),st.pop_back();Val a=st.back();st.pop_back();bool c=false;int k=(op-153)%6;
           if(op<=158){int64_t av=as_i(a);c=(k==0?av==0:k==1?av!=0:k==2?av<0:k==3?av>=0:k==4?av>0:av<=0);}
           else {int64_t av=as_i(a),bv=as_i(b);c=(k==0?av==bv:k==1?av!=bv:k==2?av<bv:k==3?av>=bv:k==4?av>bv:av<=bv);}
-          if(c)branch(off);break;
+          if(c)branch(off);
+          break;
         }
         case 165:case 166:{int16_t off=i16(code,p);Val b=st.back();st.pop_back();Val a=st.back();st.pop_back();if(same_ref(a,b)==(op==165))branch(off);break;}
         case 167:branch(i16(code,p));break;
         case 170:case 171:{
-          while(p%4)p++;int32_t fallback=i32(code,p);int64_t key=as_i(st.back());st.pop_back();int32_t chosen=fallback;
+          while(p%4)p++;
+          int32_t fallback=i32(code,p);int64_t key=as_i(st.back());st.pop_back();int32_t chosen=fallback;
           if(op==170){int32_t low=i32(code,p),high=i32(code,p);if(high-low>10000)fail("Oversized switch");for(int64_t k=low;k<=high;++k){int32_t off=i32(code,p);if(k==key)chosen=off;}}
           else {int32_t count=i32(code,p);if(count<0||count>10000)fail("Oversized switch");for(int32_t j=0;j<count;++j){int32_t k=i32(code,p),off=i32(code,p);if(k==key)chosen=off;}}
           int64_t t=int64_t(start)+chosen;if(t<0||t>=int64_t(code.size()))fail("Invalid switch");p=size_t(t);break;
@@ -660,13 +678,22 @@ static DecodedModel micro_model(const std::vector<uint8_t> &data){
   if(version==5){patterns.resize(np,std::vector<std::array<int,2>>(nt+1));for(int i=0;i<np;++i)for(int j=0;j<nt+1;++j)patterns[i][j]={int(r.u16()),int(r.u16())};}
   else patterns={{{c3,c4},{t3,t4}}};
   std::vector<int64_t> vertices;if(vf==1){vertices.resize(size_t(nv)*3);for(auto &x:vertices)x=r.s16();}
-  else if(vf==2){while(vertices.size()<size_t(nv)*3){int ch=r.bits(8);int count=((ch&63)+1)*3;if(vertices.size()+count>size_t(nv)*3)fail("Oversized vertex block");int width[]={8,10,13,16}[ch>>6];for(int i=0;i<count;++i)vertices.push_back(int32_t(r.bits(width,true)));}}
+  else if(vf==2){
+    static const int widths[]={8,10,13,16};
+    while(vertices.size()<size_t(nv)*3){
+      int ch=r.bits(8);int count=((ch&63)+1)*3;
+      if(vertices.size()+size_t(count)>size_t(nv)*3)fail("Oversized vertex block");
+      int width=widths[(ch>>6)&3];
+      for(int i=0;i<count;++i)vertices.push_back(int32_t(r.bits(width,true)));
+    }
+  }
   else fail("Unsupported vertex encoding");
   r.align();std::vector<int64_t> normals;if(nf==1){normals.resize(size_t(nv)*3);for(auto &x:normals)x=r.s16();}
   else if(nf==2){for(int i=0;i<nv;++i){int x=r.bits(7);if(x==64){int kind=r.bits(3);if(kind>5)fail("Invalid normal");static const int normal_axis[]={0,0,64,0,0,-64,0,0};
 int z=normal_axis[kind],y=normal_axis[kind+1],xx=normal_axis[kind+2];
 normals.insert(normals.end(),{xx,y,z});}else{x=(x&64)?x-128:x;int y=r.bits(7,true);int sign=r.bits(1);int z=int(std::floor(std::sqrt(double(std::max(0,4096-x*x-y*y)))+.5))*(sign?-1:1);normals.insert(normals.end(),{x,y,z});}}}
-  else if(nf!=0)fail("Unsupported normal encoding");r.align();
+  else if(nf!=0)fail("Unsupported normal encoding");
+  r.align();
   struct Poly{std::vector<int> indices;std::vector<int> attr;int texture=-1;int pattern=0;int blend=0;bool double_sided=false;};
   auto polygon=[&](const std::vector<int>&ind,const std::vector<int>&attr,int material,int face){
     for(int i:ind)if(i<0||i>=nv)fail("Vertex index outside model");
@@ -677,7 +704,17 @@ normals.insert(normals.end(),{xx,y,z});}else{x=(x&64)?x-128:x;int y=r.bits(7,tru
   };
   std::vector<Poly> colored,textured;
   if(c3+c4){int mb=r.u8(),ib=r.u8(),cb=r.u8(),ci=r.u8();(void)ci;r.u8();std::vector<std::vector<int>> pal(nc,std::vector<int>(3));for(auto &q:pal)for(int &x:q)x=r.bits(cb);
-    for(int i=0;i<c3+c4;++i){int m=r.bits(mb)<<1;if(m&0xFC09)fail("Invalid colored material");int cnt=i<c3?3:4;std::vector<int> ind(cnt);for(int &x:ind)x=r.bits(ib);int color=r.bits(ci);if(color>=nc)fail("Invalid palette index");std::vector<int> attr;for(int j=0;j<cnt;++j){attr.insert(attr.end(),pal[color]);attr.push_back((m&32)>>5);attr.push_back((m&64)>>6);}Poly p=polygon(ind,attr,m,-1);p.attr=attr;colored.push_back(std::move(p));}}
+    for(int i=0;i<c3+c4;++i){
+      int m=r.bits(mb)<<1;if(m&0xFC09)fail("Invalid colored material");
+      int cnt=i<c3?3:4;std::vector<int> ind(cnt);for(int &x:ind)x=r.bits(ib);
+      int color=r.bits(ci);if(color>=nc)fail("Invalid palette index");
+      std::vector<int> attr;
+      for(int j=0;j<cnt;++j){
+        attr.insert(attr.end(),pal[color].begin(),pal[color].end());
+        attr.push_back((m&32)>>5);attr.push_back((m&64)>>6);
+      }
+      Poly p=polygon(ind,attr,m,-1);p.attr=attr;colored.push_back(std::move(p));
+    }}
   if(t3+t4){int mb=0,ib=0,uv=0;if(pf==2){mb=r.u8();ib=r.u8();uv=7;}else if(pf==3){mb=r.bits(8);ib=r.bits(8);uv=r.bits(8);r.bits(8);}else if(pf!=1)fail("Unsupported polygon encoding");
     for(int i=0;i<t3+t4;++i){int cnt=i<t3?3:4,m=0;std::vector<int>ind(cnt),attr; if(pf==1){m=r.u16();if(m&(cnt==3?0xFFF9:0xFFF8)||(cnt==4&&!((m)&1)))fail("Invalid material");for(int &x:ind)x=r.u16();m=((m&4)<<2)|((m&2)>>1);for(int j=0;j<cnt;++j){attr.insert(attr.end(),{int(r.u8()),int(r.u8()),1,0,m&1});}}
       else{m=r.bits(mb);if(m&(pf==2?0xFF88:0xFC08))fail("Invalid material");for(int &x:ind)x=r.bits(ib);for(int j=0;j<cnt;++j)attr.insert(attr.end(),{int(r.bits(uv)),int(r.bits(uv)),(m&32)>>5,(m&64)>>6,m&1});}
@@ -739,8 +776,15 @@ static Json micro_animation(const std::vector<uint8_t>&data){
 }
 
 static std::vector<uint8_t> bmp_png(const std::vector<uint8_t>&d,bool alpha){
-  if(d.size()<54||d[0]!='B'||d[1]!='M')fail("Invalid BMP");uint32_t offset=rd32(d.data()+10),header=rd32(d.data()+14);int32_t w=int32_t(rd32(d.data()+18)),h=int32_t(rd32(d.data()+22));uint16_t planes=rd16(d.data()+26),bits=rd16(d.data()+28);uint32_t comp=rd32(d.data()+30);
-  if(header!=40||planes!=1||bits!=8||comp||w<=0||std::abs(h)>4096||w>4096)fail("Unsupported BMP encoding");uint32_t colors=rd32(d.data()+46);if(!colors)colors=256;if(colors<1||colors>256||offset<54+colors*4)fail("Invalid BMP palette");size_t stride=(size_t(w)+3)/4*4;if(uint64_t(offset)+uint64_t(std::abs(h))*stride>d.size())fail("Truncated BMP pixels");
+  if(d.size()<54||d[0]!='B'||d[1]!='M')fail("Invalid BMP");
+  uint32_t offset=rd32(d.data()+10),header=rd32(d.data()+14);
+  int32_t w=int32_t(rd32(d.data()+18)),h=int32_t(rd32(d.data()+22));
+  uint16_t planes=rd16(d.data()+26),bits=rd16(d.data()+28);uint32_t comp=rd32(d.data()+30);
+  if(header!=40||planes!=1||bits!=8||comp||w<=0||std::abs(h)>4096||w>4096)fail("Unsupported BMP encoding");
+  uint32_t colors=rd32(d.data()+46);if(!colors)colors=256;
+  if(colors<1||colors>256||offset<54+colors*4)fail("Invalid BMP palette");
+  size_t stride=(size_t(w)+3)/4*4;
+  if(uint64_t(offset)+uint64_t(std::abs(h))*stride>d.size())fail("Truncated BMP pixels");
   std::vector<uint8_t> rows;rows.reserve(size_t(w)*size_t(std::abs(h))*4+size_t(std::abs(h)));
   for(int y=0;y<std::abs(h);++y){rows.push_back(0);int sy=h>0?(std::abs(h)-1-y):y;const uint8_t*p=d.data()+offset+size_t(sy)*stride;for(int x=0;x<w;++x){uint8_t idx=p[x];if(idx>=colors)fail("BMP palette index outside table");const uint8_t*q=d.data()+54+size_t(idx)*4;rows.push_back(q[2]);rows.push_back(q[1]);rows.push_back(q[0]);rows.push_back(alpha&&idx==0?0:255);}}
   uLongf clen=compressBound(rows.size());std::vector<uint8_t> z(clen);if(compress2(z.data(),&clen,rows.data(),rows.size(),Z_BEST_SPEED)!=Z_OK)fail("PNG compression failed");z.resize(clen);
@@ -781,10 +825,12 @@ static Json table_json(const std::string&root){
     auto rows=split(clean,';');auto arr=jarr();bool station=!strcmp(name,"stations"),goods=!strcmp(name,"goods");
     for(auto &row:rows){if(row.empty())continue;auto cells=split(row,',');auto r=jarr();if(station){r->v.push_back(js(cells[0]));for(size_t i=1;i<cells.size();++i)r->v.push_back(ji(std::stoll(cells[i])));}
       else if(goods){for(size_t i=0;i<std::min<size_t>(7,cells.size());++i)r->v.push_back(ji(std::stoll(cells[i])));for(size_t i=7;i<cells.size();++i){auto q=jarr();for(auto&s:split(cells[i],' '))if(!s.empty())q->v.push_back(ji(std::stoll(s)));r->v.push_back(ja(q));}}
-      else for(auto&s:cells)r->v.push_back(ji(std::stoll(s)));arr->v.push_back(ja(r));}
+      else {for(auto&s:cells)r->v.push_back(ji(std::stoll(s)));}arr->v.push_back(ja(r));}
     all->v[name]=ja(arr);
   }return jo(all);
 }
+
+static std::map<std::string,std::vector<double>> g_model_geometry;
 
 static Json read_lang_file(const std::string&path){
   auto d=read_all(path);Rdr r(d);auto arr=jarr();while(r.p<d.size()){uint16_t n=r.u2();auto x=r.take(n);arr->v.push_back(js(mutf8(x)));}return ja(arr);
@@ -1025,7 +1071,7 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
   for(const auto &m:models){
     if(m.id<3300||m.id>=3400)continue;
     auto it=g_model_geometry.find(m.model);if(it==g_model_geometry.end()||it->second.size()!=6)continue;
-    auto g=jobj(),c=jarr(),e=jarr();
+    auto g=jobj();auto c=jarr();auto e=jarr();
     for(int i=0;i<3;++i)c->v.push_back(jd(it->second[i]));
     for(int i=3;i<6;++i)e->v.push_back(jd(it->second[i]));
     g->v["center"]=ja(c);g->v["extent"]=ja(e);station_geometry->v[std::to_string(m.id)]=jo(g);
@@ -1069,7 +1115,10 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
     long size=0;FILE*f=fopen(jar_path,"rb");if(!f)fail("Cannot open JAR");fseek(f,0,SEEK_END);size=ftell(f);fclose(f);if(size<0||size>16*1024*1024)fail("JAR exceeds 16 MiB.");
     std::string digest=sha256_file(jar_path);std::string base=std::string(cache_root)+"/_jar_import";std::string pack=base+"/"+digest+".abyss";
     if(!file_exists(pack)){std::string work=base+"/"+digest+".work";remove_tree(work);mkdir_recursive(work);extract_jar(jar_path,work);build_pack(work,digest,pack);remove_tree(work);}
-    if(!file_exists(pack))fail("Native JAR converter did not create a content pack");if(pack.size()+1>out_size)fail("Converted pack path is too long");snprintf(out,out_size,"%s",pack.c_str());g_error.clear();return 1;
+    if(!file_exists(pack))fail("Native JAR converter did not create a content pack");
+    if(pack.size()+1>out_size)fail("Converted pack path is too long");
+    snprintf(out,out_size,"%s",pack.c_str());
+    g_error.clear();return 1;
   }catch(const std::exception&e){g_error=e.what();debugPrintf("[jar] %s\n",g_error.c_str());return 0;}
 }
 
