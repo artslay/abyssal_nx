@@ -1288,18 +1288,22 @@ int main(void) {
   }
 
   if (jni_quit_requested) {
-    // Android's real forceQuit() terminates the whole app process. Do the same
-    // on Switch instead of waiting for Godot's render/game thread to unwind:
-    // the engine may already be inside Main::cleanup(), where NVK/worker-thread
-    // teardown can block indefinitely. Waiting here would make the Exit button
-    // appear to hang forever.
-    debugPrintf("== Exit requested by game; terminating process immediately ==\n");
+    // The quit hook runs on Godot's game/render thread. Return to the hbloader
+    // from this original NRO entry thread instead of calling an exit routine
+    // from a worker thread. Bypass __appExit(): Godot/NVK cleanup can deadlock.
+    debugPrintf("== Exit requested by game; main thread returning to homebrew loader ==\n");
     s_game_running = 0;
     s_ithread_run = 0;
-    extern u32 __nx_applet_exit_mode;
-    extern void NX_NORETURN __libnx_exit(int rc);
-    __nx_applet_exit_mode = 0;
-    __libnx_exit(0);
+
+    extern void NX_NORETURN __nx_exit(Result rc, LoaderReturnFn retaddr);
+    LoaderReturnFn retaddr = envGetExitFuncPtr();
+    debugPrintf("[exit] loader return=%p\n", (void *)retaddr);
+    if (retaddr) {
+      __nx_exit(0, retaddr);
+    }
+
+    debugPrintf("[exit] loader return callback is NULL; forcing process exit\n");
+    svcExitProcess();
   }
 
   s_game_running = 0;
