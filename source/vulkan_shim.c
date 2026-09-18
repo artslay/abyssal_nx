@@ -101,19 +101,22 @@ shim_vkCreateInstance(const VkInstanceCreateInfo *info,
 }
 
 // --- proc address ------------------------------------------------------------
-// NVK on Switch can hang inside vkDestroyInstance during normal Godot
-// shutdown while its C11 worker threads are being joined. At this point the
-// whole Switch process is exiting anyway, so deliberately leave the Vulkan
-// instance allocated and let __libnx_exit() tear the process down. This keeps
-// Godot's normal cleanup path from blocking on the driver.
+// The hardware log shows that Godot reaches vkDestroyInstance during Exit and
+// then never returns from GodotLib.step(). NVK/Godot continues cleanup after
+// vkDestroyInstance, where a worker-thread teardown hangs. At this exact point
+// the application is already shutting down, so terminate the WHOLE Switch
+// process instead of returning to the hanging cleanup code.
 //
-// Important: do NOT suppress this during normal rendering; it is only safe here
-// because no further Vulkan work is submitted after the engine begins exit.
+// This is deliberately svcExitProcess(), not __nx_exit(): the call can happen
+// on Godot's render/game thread, and __nx_exit() must not be used from a worker
+// thread because the hbloader return path belongs to the original NRO thread.
 static VKAPI_ATTR void VKAPI_CALL
 shim_vkDestroyInstance(VkInstance inst, const VkAllocationCallbacks *alloc) {
   (void)inst;
   (void)alloc;
-  debugPrintf("[vk] vkDestroyInstance suppressed during Switch process exit\n");
+  debugPrintf("[vk] vkDestroyInstance during exit -> svcExitProcess()\n");
+  svcExitProcess();
+  __builtin_unreachable();
 }
 
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
