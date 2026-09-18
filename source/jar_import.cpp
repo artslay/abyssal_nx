@@ -18,16 +18,20 @@
 #include "jar_import.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <dirent.h>
+#include <functional>
 #include <map>
 #include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <sys/stat.h>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -585,7 +589,8 @@ struct Evaluator {
           uint16_t idx=rd16(code.data()+p);p+=2;auto [owner,field,fd]=cl.reference(idx);auto key=std::make_tuple(owner,field,fd);
           if(op==178){auto it=statics.find(key);if(it==statics.end())fail("Unspecified static input");st.push_back(it->second);}
           else if(op==179){statics[key]=st.back();st.pop_back();}
-          else {auto o=std::get<std::shared_ptr<Obj>>(st.back());st.pop_back();st.push_back(o&&o->f.count(field+":"+fd)?o->f[field+":"+fd]:defval(fd));if(op==181){Val v=st.back();st.pop_back();auto oo=std::get<std::shared_ptr<Obj>>(st.back());st.pop_back();if(oo)oo->f[field+":"+fd]=v;}}
+          else if(op==180){auto o=std::get<std::shared_ptr<Obj>>(st.back());st.pop_back();st.push_back(o&&o->f.count(field+":"+fd)?o->f[field+":"+fd]:defval(fd));}
+        else {Val v=st.back();st.pop_back();auto o=std::get<std::shared_ptr<Obj>>(st.back());st.pop_back();if(o)o->f[field+":"+fd]=v;}
           break;
         }
         case 182:case 183:case 184:{
@@ -606,6 +611,38 @@ struct Evaluator {
     fail("Data evaluation instruction budget exceeded");return {};
   }
 };
+
+
+static Json val_json(const Val &v) {
+  if (std::holds_alternative<std::monostate>(v)) return Json(std::monostate{});
+  if (auto p=std::get_if<bool>(&v)) return *p;
+  if (auto p=std::get_if<int64_t>(&v)) return ji(*p);
+  if (auto p=std::get_if<double>(&v)) return jd(*p);
+  if (auto p=std::get_if<std::string>(&v)) return js(*p);
+  if (auto p=std::get_if<std::shared_ptr<Arr>>(&v)) {
+    auto a=jarr(); if (*p) for (const auto &x:(*p)->v) a->v.push_back(val_json(x)); return ja(a);
+  }
+  auto o=jobj();
+  if (auto p=std::get_if<std::shared_ptr<Obj>>(&v); p && *p) {
+    o->v["_type"]=js((*p)->type);
+    for (const auto &kv:(*p)->f) {
+      if (kv.first.find(':')==std::string::npos) continue;
+      size_t q=kv.first.find(':');std::string n=kv.first.substr(0,q),d=kv.first.substr(q+1);
+      o->v[n+":"+desc_type(d)]=val_json(kv.second);
+    }
+  }
+  return jo(o);
+}
+
+static Json record_json(const std::shared_ptr<Obj> &obj) {
+  auto out=jobj(); if (!obj) return jo(out);
+  for (const auto &kv:obj->f) {
+    if (kv.first.find(':')==std::string::npos) continue;
+    size_t q=kv.first.find(':');std::string n=kv.first.substr(0,q),d=kv.first.substr(q+1);
+    out->v[n+":"+desc_type(d)]=val_json(kv.second);
+  }
+  return jo(out);
+}
 
 /* ------------------------------------------------------------------------- */
 /* Micro3D                                                                   */
@@ -645,7 +682,13 @@ static DecodedModel micro_model(const std::vector<uint8_t> &data){
   else if(nf==2){for(int i=0;i<nv;++i){int x=r.bits(7);if(x==64){int kind=r.bits(3);if(kind>5)fail("Invalid normal");int z[]={0,0,64,0,0,-64,0,0}[kind],y[]={0,0,64,0,0,-64,0,0}[kind+1],xx[]={0,0,64,0,0,-64,0,0}[kind+2];normals.insert(normals.end(),{xx,y,z});}else{x=(x&64)?x-128:x;int y=r.bits(7,true);int sign=r.bits(1);int z=int(std::floor(std::sqrt(double(std::max(0,4096-x*x-y*y)))+.5))*(sign?-1:1);normals.insert(normals.end(),{x,y,z});}}}
   else if(nf!=0)fail("Unsupported normal encoding");r.align();
   struct Poly{std::vector<int> indices;std::vector<int> attr;int texture=-1;int pattern=0;int blend=0;bool double_sided=false;};
-  auto polygon=[&](const std::vector<int>&ind,const std::vector<int>&attr,int material,int face){for(int i:ind)if(i>=nv)fail("Vertex index outside model");Poly p;p.indices=ind;p.attr=attr;p.texture=face;p.blend=material&6;p.double_sided=bool(material&16);if(ind.size()==3){p.indices={ind[0],ind[1],ind[2]};p.attr={};}else p.indices={ind[0],ind[1],ind[2],ind[2],ind[1],ind[3]};for(int i:p.indices)(void)i;return p;};
+  auto polygon=[&](const std::vector<int>&ind,const std::vector<int>&attr,int material,int face){
+    for(int i:ind)if(i<0||i>=nv)fail("Vertex index outside model");
+    Poly p;p.texture=face;p.blend=material&6;p.double_sided=bool(material&16);
+    if(ind.size()==3){p.indices=ind;p.attr=attr;}
+    else {int order[]={0,1,2,2,1,3};for(int q:order)p.indices.push_back(ind[q]);for(int q:order)for(int k=0;k<5;++k)p.attr.push_back(attr[q*5+k]);}
+    return p;
+  };
   std::vector<Poly> colored,textured;
   if(c3+c4){int mb=r.u8(),ib=r.u8(),cb=r.u8(),ci=r.u8();(void)ci;r.u8();std::vector<std::vector<int>> pal(nc,std::vector<int>(3));for(auto &q:pal)for(int &x:q)x=r.bits(cb);
     for(int i=0;i<c3+c4;++i){int m=r.bits(mb)<<1;if(m&0xFC09)fail("Invalid colored material");int cnt=i<c3?3:4;std::vector<int> ind(cnt);for(int &x:ind)x=r.bits(ib);int color=r.bits(ci);if(color>=nc)fail("Invalid palette index");std::vector<int> attr;for(int j=0;j<cnt;++j){attr.insert(attr.end(),pal[color]);attr.push_back((m&32)>>5);attr.push_back((m&64)>>6);}Poly p=polygon(ind,attr,m,-1);p.attr=attr;colored.push_back(std::move(p));}}
@@ -668,7 +711,7 @@ static Json micro_animation(const std::vector<uint8_t>&data){
   struct Bone{std::vector<double> matrix,translate,rotate,roll,scale;std::vector<std::pair<int,std::vector<double>>> tt,rr,rl,ss;};
   auto out=jarr();int total=0;
   for(int act=0;act<actions;++act){int last=r.u16();total+=(last+1)*nb*12;if(total>4000000)fail("Animation exceeds limits");std::vector<Bone>b(nb);
-    for(auto &x:b){int kind=r.u8();if(kind==0)x.matrix=r.matrix();else if(kind==1)x.matrix=ID();else if(kind>=2&&kind<=6){if(kind==2||kind==6)x.tt=track();if(kind==3)x.tt={{0,{double(r.s16()),double(r.s16()),double(r.s16())}}};x.rr=track();if(kind==3)x.rl={{0,{double(r.s16())*6.283185307179586/4096.0}}};else if(kind!=5)x.rl=track(1,6.283185307179586/4096.0);}else fail("Unsupported animation bone");}
+    for(auto &x:b){int kind=r.u8();if(kind==0)x.matrix=r.matrix();else if(kind==1)x.matrix=ID();else if(kind>=2&&kind<=6){if(kind==2||kind==6)x.tt=track();if(kind==3)x.tt={{0,{double(r.s16()),double(r.s16()),double(r.s16())}}};if(kind==2)x.ss=track(3,1.0/4096.0);x.rr=track();if(kind==3)x.rl={{0,{double(r.s16())*6.283185307179586/4096.0}}};else if(kind!=5)x.rl=track(1,6.283185307179586/4096.0);}else fail("Unsupported animation bone");}
     auto mats=jarr();for(int frame=0;frame<=last;++frame){auto all=jarr();for(auto &x:b){std::vector<double>m=x.matrix.empty()?ID():x.matrix;if(!x.tt.empty()){auto v=sample(x.tt,frame);m[3]=v[0];m[7]=v[1];m[11]=v[2];}if(!x.rr.empty()){auto v=sample(x.rr,frame);double xx=v[0],yy=v[1],zz=v[2];if(xx==0&&yy==0){if(zz<0)m[5]=m[10]=-1;}else{double len=std::sqrt(xx*xx+yy*yy+zz*zz);xx/=len;yy/=len;zz/=len;len=std::hypot(xx,yy);double rx=-yy/len,ry=xx/len;double s=std::sqrt(std::max(0.0,1-zz*zz)),nc=1-zz;m[0]=rx*rx*nc+zz;m[1]=rx*ry*nc;m[2]=ry*s;m[4]=rx*ry*nc;m[5]=ry*ry*nc+zz;m[6]=-rx*s;m[8]=-ry*s;m[9]=rx*s;m[10]=zz;}}
       if(!x.rl.empty()){double angle=sample(x.rl,frame)[0],c=std::cos(angle),s=std::sin(angle);for(int row:{0,4,8}){double a=m[row],bb=m[row+1];m[row]=a*c+bb*s;m[row+1]=bb*c-a*s;}}
       if(!x.ss.empty()){auto v=sample(x.ss,frame);for(int row:{0,4,8})for(int col=0;col<3;++col)m[row+col]*=v[col];}
@@ -733,33 +776,222 @@ static Json read_lang_file(const std::string&path){
 /* The game-specific profile is intentionally close to extract_data.py. */
 static void build_profile(const std::string&jar,const std::string&root,const ZipReader&zip){
   static const char* classes_req[]={"ah","e","bo","ab","f","dj","cy"};
-  std::map<std::string,ClassData> classes;for(const char* n:classes_req){if(!zip.has(std::string(n)+".class"))fail("This DEEP build does not match the declarative content profile: missing "+std::string(n)+".class");classes.emplace(n,ClassData(zip.read(std::string(n)+".class")));}
+  std::map<std::string,ClassData> classes;
+  for(const char* n:classes_req){
+    if(!zip.has(std::string(n)+".class"))
+      fail("This DEEP build does not match the declarative content profile: missing "+std::string(n)+".class");
+    classes.emplace(n,ClassData(zip.read(std::string(n)+".class")));
+  }
+
   StaticMap st;
-  for(auto &cp:classes)for(auto &f:cp.second.fields)if(f.second.flags&8){auto it=f.second.attrs.find("ConstantValue");if(it!=f.second.attrs.end()){Rdr rr(it->second);uint16_t ix=rr.u2();CP c=cp.second.constant(ix);Val v;if(c.tag==3||c.tag==5)v=std::get<int64_t>(c.v);else if(c.tag==4||c.tag==6)v=std::get<double>(c.v);else v=cp.second.constant_str(ix);st[{cp.first,f.first.first,f.first.second}]=v;}else st[{cp.first,f.first.first,f.first.second}]=defval(f.first.second);}
-  auto al=std::make_shared<Obj>();al->type="al";al->f["a:I"]=Val(int64_t(-1));al->f["b:Z"]=Val(false);al->f["e:Z"]=Val(false);st[{"al","a","Lal;"}]=al;st[{"ap","b","I"}]=int64_t(1);
-  std::map<int,std::string> textures;std::vector<ModelReg> models;std::shared_ptr<Obj> active;std::vector<int64_t> changes;
-  Evaluator ev{classes,st,[&](const std::string&owner,const std::string&name,const std::string&desc,const std::shared_ptr<Obj>&obj,const std::vector<Val>&args)->Val{
-    if(owner=="java/lang/StringBuffer"){if(name=="<init>"){if(obj)obj->f["text"]=args.empty()?Val(std::string("")):Val(std::get<std::string>(args[0]));return {};}if(name=="append"){obj->f["text"]=std::get<std::string>(obj->f["text"])+std::get<std::string>(args[0]);return obj;}if(name=="toString")return obj?obj->f["text"]:Val(std::string(""));}
-    if(owner=="cd"&&name=="a"){if(desc=="(ILjava/lang/String;)V"){textures[int(as_i(args[0]))]=std::get<std::string>(args[1]);return {};}if(desc=="(ILjava/lang/String;II)V"||desc=="(ILjava/lang/String;I)V"){ModelReg m{int(as_i(args[0])),std::get<std::string>(args[1]),""};int tid=int(as_i(args.back()));m.texture=textures.count(tid)?textures[tid]:"";models.push_back(std::move(m));return {};}}
-    if(owner=="al"){if(name=="<init>"&&desc=="(III)V"){int kind=int(as_i(args[0])),reward=int(as_i(args[1])),dest=int(as_i(args[2]));if(obj){obj->f["a:I"]=int64_t(kind);obj->f["c:I"]=int64_t(reward);obj->f["e:I"]=int64_t(dest);obj->f["b:Ljava/lang/String;"]=Val(std::string(""));obj->f["g:I"]=int64_t(-1);obj->f["h:I"]=int64_t(-1);obj->f["b:Z"]=true;obj->f["e:Z"]=true;}return {};}if(name=="a"&&desc=="(III)V"){if(obj){int total=int(as_i(args[1])),minimum=int(as_i(args[2]));obj->f["n:I"]=int64_t(as_i(args[0]));obj->f["o:I"]=int64_t(total);obj->f["p:I"]=int64_t(minimum);obj->f["q:I"]=int64_t(total?minimum*100/total:0);}return {};}if(name=="a"&&desc=="(II)V"){if(obj){obj->f["l:I"]=int64_t(as_i(args[0]));obj->f["m:I"]=int64_t(as_i(args[1]));}return {};}}
-    if(owner=="dj"){if(name=="c"&&desc=="(Lal;)V"){active=std::get<std::shared_ptr<Obj>>(args[0]);if(active)active->f["b:Z"]=true;return {};}if(name=="c"&&desc=="()Lal;")return active?Val(active):Val(std::monostate{});if(name=="a"&&desc=="([I)V"){auto a=std::get<std::shared_ptr<Arr>>(args[0]);for(auto&v:a->v)changes.push_back(as_i(v));return {};}if((name=="j"||name=="o")&&desc=="()I")return int64_t(0);}
+  for(auto &cp:classes){
+    for(auto &f:cp.second.fields){
+      if(!(f.second.flags&8))continue;
+      auto key=std::make_tuple(cp.first,f.first.first,f.first.second);
+      auto it=f.second.attrs.find("ConstantValue");
+      if(it==f.second.attrs.end()){st[key]=defval(f.first.second);continue;}
+      Rdr rr(it->second);uint16_t ix=rr.u2();CP c=cp.second.constant(ix);
+      if(c.tag==3||c.tag==5)st[key]=std::get<int64_t>(c.v);
+      else if(c.tag==4||c.tag==6)st[key]=std::get<double>(c.v);
+      else st[key]=cp.second.constant_str(ix);
+    }
+  }
+
+  auto al=std::make_shared<Obj>();al->type="al";
+  al->f["a:I"]=int64_t(-1);al->f["b:Z"]=false;al->f["e:Z"]=false;
+  st[{"al","a","Lal;"}]=al;st[{"ap","b","I"}]=int64_t(1);
+
+  std::map<int,std::string> textures;
+  std::vector<ModelReg> models;
+  std::shared_ptr<Obj> active;
+  std::vector<int64_t> changes;
+
+  Evaluator ev{classes,st,[&](const std::string&owner,const std::string&name,const std::string&desc,
+                              const std::shared_ptr<Obj>&obj,const std::vector<Val>&args)->Val{
+    if(owner=="java/lang/StringBuffer"){
+      if(name=="<init>"){
+        if(obj)obj->f["text"]=args.empty()?Val(std::string("")):
+          (std::holds_alternative<std::string>(args[0])?args[0]:Val(std::string("")));
+        return {};
+      }
+      if(name=="append"){
+        std::string left;
+        auto it=obj?obj->f.find("text"):std::map<std::string,Val>::const_iterator{};
+        if(obj&&it!=obj->f.end()&&std::holds_alternative<std::string>(it->second))left=std::get<std::string>(it->second);
+        std::string right=args.empty()?"":(std::holds_alternative<std::string>(args[0])?std::get<std::string>(args[0]):"");
+        if(obj)obj->f["text"]=left+right;
+        return obj;
+      }
+      if(name=="toString"){
+        if(obj&&obj->f.count("text"))return obj->f["text"];
+        return Val(std::string(""));
+      }
+    }
+
+    if(owner=="cd"&&name=="a"){
+      if(desc=="(ILjava/lang/String;)V"){
+        textures[int(as_i(args[0]))]=std::get<std::string>(args[1]);return {};
+      }
+      if(desc=="(ILjava/lang/String;II)V"||desc=="(ILjava/lang/String;I)V"){
+        ModelReg m{int(as_i(args[0])),std::get<std::string>(args[1]),""};
+        int tid=int(as_i(args.back()));if(textures.count(tid))m.texture=textures[tid];
+        models.push_back(std::move(m));return {};
+      }
+    }
+
+    if(owner=="al"){
+      if(name=="<init>"&&desc=="(III)V"){
+        int kind=int(as_i(args[0])),reward=int(as_i(args[1])),dest=int(as_i(args[2]));
+        if(obj){
+          obj->f["a:I"]=int64_t(kind);obj->f["c:I"]=int64_t(reward);obj->f["e:I"]=int64_t(dest);
+          obj->f["b:Ljava/lang/String;"]=Val(std::string(""));
+          obj->f["g:I"]=int64_t(-1);obj->f["h:I"]=int64_t(-1);obj->f["b:Z"]=true;obj->f["e:Z"]=true;
+        }
+        return {};
+      }
+      if(name=="a"&&desc=="(III)V"){
+        if(obj){int total=int(as_i(args[1])),minimum=int(as_i(args[2]));obj->f["n:I"]=int64_t(as_i(args[0]));obj->f["o:I"]=int64_t(total);obj->f["p:I"]=int64_t(minimum);obj->f["q:I"]=int64_t(total?minimum*100/total:0);}
+        return {};
+      }
+      if(name=="a"&&desc=="(II)V"){if(obj){obj->f["l:I"]=int64_t(as_i(args[0]));obj->f["m:I"]=int64_t(as_i(args[1]));}return {};}
+    }
+
+    if(owner=="dj"){
+      if(name=="c"&&desc=="(Lal;)V"){
+        active=args.empty()?nullptr:std::get<std::shared_ptr<Obj>>(args[0]);if(active)active->f["b:Z"]=true;return {};
+      }
+      if(name=="c"&&desc=="()Lal;")return active?Val(active):Val(std::monostate{});
+      if(name=="a"&&desc=="([I)V"){
+        auto a=std::get<std::shared_ptr<Arr>>(args[0]);if(a)for(auto&v:a->v)changes.push_back(as_i(v));return {};
+      }
+      if((name=="j"||name=="o")&&desc=="()I")return int64_t(0);
+    }
+
     if(owner=="dt"&&name=="c"&&desc=="(II)I")return int64_t(std::min(as_i(args[0]),as_i(args[1])));
-    if(owner=="dk"&&name=="<init>"&&(desc=="(IIII)V"||desc=="(III[I)V")){if(obj){obj->f["text_id:I"]=int64_t(as_i(args[0]));obj->f["speaker:I"]=int64_t(as_i(args[1]));obj->f["kind:I"]=int64_t(as_i(args[2]));obj->f["values"]=args[3];}return {};}
-    fail("Call is not an approved data summary: "+owner+"."+name+desc);return {};
+
+    if(owner=="dk"&&name=="<init>"&&(desc=="(IIII)V"||desc=="(III[I)V")){
+      if(obj){
+        obj->f["text_id:I"]=int64_t(as_i(args[0]));
+        obj->f["speaker:I"]=int64_t(as_i(args[1]));
+        obj->f["kind:I"]=int64_t(as_i(args[2]));
+        obj->f["values"]=args[3];
+      }
+      return {};
+    }
+
+    fail("Call is not an approved data summary: "+owner+"."+name+desc);
+    return {};
   }};
-  for(const char* n:{"ah","e","bo","ab","f"})ev.run(n,"<clinit>","()V",{});ev.run("ah","e","()V",{});
-  for(auto&m:models){m.model.erase(m.model.begin(),m.model.begin()+((!m.model.empty()&&m.model[0]=='/')?1:0));m.texture.erase(m.texture.begin(),m.texture.begin()+((!m.texture.empty()&&m.texture[0]=='/')?1:0));m.model+=".mbac";m.texture+=".bmp";if(!file_exists(root+"/"+m.model)||!file_exists(root+"/"+m.texture))fail("Missing registered resource: "+m.model);}
-  auto registry=jarr();auto binds=jobj();for(auto&m:models){auto o=jobj();o->v["id"]=ji(m.id);o->v["model"]=js(m.model);auto ts=jarr();ts->v.push_back(js(m.texture));o->v["textures"]=ja(ts);registry->v.push_back(jo(o));binds->v[m.model]=ja(ts);}
-  write_bin(root+"/resource_registry.json",std::vector<uint8_t>(json_string(ja(registry)).begin(),json_string(ja(registry)).end()));
+
+  for(const char*n:{"ah","e","bo","ab","f"})ev.run(n,"<clinit>","()V",{});
+  ev.run("ah","e","()V",{});
+
+  for(auto &m:models){
+    if(!m.model.empty()&&m.model[0]=='/')m.model.erase(m.model.begin());
+    if(!m.texture.empty()&&m.texture[0]=='/')m.texture.erase(m.texture.begin());
+    m.model+=".mbac";m.texture+=".bmp";
+    if(!file_exists(root+"/"+m.model)||!file_exists(root+"/"+m.texture))
+      fail("Missing registered resource: "+m.model);
+  }
+
+  auto registry=jarr();auto binds=jobj();
+  for(auto&m:models){
+    auto o=jobj();o->v["id"]=ji(m.id);o->v["model"]=js(m.model);
+    auto ts=jarr();ts->v.push_back(js(m.texture));o->v["textures"]=ja(ts);
+    registry->v.push_back(jo(o));binds->v[m.model]=ja(ts);
+  }
+  std::string reg_s=json_string(ja(registry));write_bin(root+"/resource_registry.json",std::vector<uint8_t>(reg_s.begin(),reg_s.end()));
   std::string bind_s=json_string(jo(binds));write_bin(root+"/bindings.json",std::vector<uint8_t>(bind_s.begin(),bind_s.end()));
-  auto constants=jobj();for(const char* owner:{"ah","e","bo","ab","f"}){auto o=jobj();for(auto&kv:st){if(std::get<0>(kv.first)!=owner)continue;std::string d=std::get<2>(kv.first);if(d.empty()|| (d[0]!='L'&&d[0]!='[')){if(auto p=std::get_if<int64_t>(&kv.second))o->v[std::get<1>(kv.first)+":"+desc_type(d)]=ji(*p);else if(auto p=std::get_if<double>(&kv.second))o->v[std::get<1>(kv.first)+":"+desc_type(d)]=jd(*p);}}constants->v[owner]=jo(o);}
-  auto sint=jarr();for(int i=0;i<=1024;++i)sint->v.push_back(ji(int(std::llround(std::sin(i*6.283185307179586/4096.0)*4096.0))));auto dt=jobj();dt->v["a:[S"]=ja(sint);constants->v["dt"]=jo(dt);
-  int chapters=0;if(auto co=constants->v["e"],*o=std::get<std::shared_ptr<JsonObj>>(co),it=o->v.find("g:[short");it!=o->v.end())if(auto p=std::get_if<std::shared_ptr<JsonArr>>(&it->second))chapters=int((*p)->v.size());
-  auto campaign=jarr(),timelines=jobj();for(int ch=1;ch<=chapters;++ch){st[{"dj","v","I"}]=int64_t(ch-1);active.reset();changes.clear();ev.run("dj","c","()V",{});auto c=jobj();c->v["chapter"]=ji(ch);c->v["mission"]=active?jo(jobj()):jo(jobj());c->v["rebel_stations"]=ja(jarr());campaign->v.push_back(jo(c));}
-  auto strings=jarr();std::vector<std::string>langs;DIR*d=opendir((root+"/data/lang").c_str());if(d){struct dirent*e;while((e=readdir(d)))if(e->d_type==DT_DIR&&e->d_name[0]!='.')langs.push_back(e->d_name);closedir(d);}if(langs.empty())fail("This DEEP build does not match the declarative content profile: no localisation");std::sort(langs.begin(),langs.end());std::string lang=std::find(langs.begin(),langs.end(),"en")!=langs.end()?"en":langs[0];
-  std::vector<std::string>lnames={"main","ships","cargo","items","medals"};for(int i=0;i<chapters-1;++i)lnames.push_back(std::to_string(i));for(auto&n:lnames){Json a=read_lang_file(root+"/data/lang/"+lang+"/"+n+".lang");auto ar=std::get<std::shared_ptr<JsonArr>>(a);for(auto&x:ar->v)strings->v.push_back(x);}
-  auto names=jarr();for(const char* g:{"f","m"}){auto a=jarr();std::string raw=read_text(root+"/data/txt/names_human_"+g+".txt");for(char &c:raw)if(c=='\r'||c=='\n'||c=='\t')c=0;std::string clean;for(char c:raw)if(c)clean.push_back(c);for(auto&s:split(clean,';'))if(!s.empty())a->v.push_back(js(s));names->v.push_back(ja(a));}
-  auto out=jobj();out->v["schema"]=ji(1);out->v["jar_sha256"]=js(sha256_file(jar));out->v["importer"]=js("native-6");out->v["language"]=js(lang);out->v["constants"]=jo(constants);out->v["tables"]=table_json(root);out->v["campaign"]=ja(campaign);out->v["timelines"]=jo(timelines);out->v["strings"]=ja(strings);out->v["name_pools"]=ja(names);out->v["habitats"]=ja(jarr());out->v["data_reader"]=js("restricted-class-data-1");out->v["station_geometry"]=jo(jobj());
+
+  auto constants=jobj();
+  for(const char*owner:{"ah","e","bo","ab","f"}){
+    auto o=jobj();
+    for(auto&kv:st){
+      if(std::get<0>(kv.first)!=owner)continue;
+      std::string d=std::get<2>(kv.first);
+      bool allowed=(d=="I"||d=="S"||d=="B"||d=="Z"||d=="J"||d=="F"||d=="D"||d=="C"||d=="Ljava/lang/String;"||(!d.empty()&&d[0]=='['));
+      if(allowed)o->v[std::get<1>(kv.first)+":"+desc_type(d)]=val_json(kv.second);
+    }
+    constants->v[owner]=jo(o);
+  }
+
+  auto sint=jarr();
+  for(int i=0;i<=1024;++i)sint->v.push_back(ji(int(std::llround(std::sin(i*6.283185307179586/4096.0)*4096.0))));
+  auto dt=jobj();dt->v["a:[S"]=ja(sint);constants->v["dt"]=jo(dt);
+
+  int chapters=0;
+  auto ec_it=st.find({"e","g","[S"});
+  if(ec_it!=st.end()&&std::holds_alternative<std::shared_ptr<Arr>>(ec_it->second)&&std::get<std::shared_ptr<Arr>>(ec_it->second))
+    chapters=int(std::get<std::shared_ptr<Arr>>(ec_it->second)->v.size());
+  if(chapters<=0)fail("The declarative content profile contains no campaign chapters");
+
+  auto campaign=jarr();auto timelines=jobj();
+  for(int ch=1;ch<=chapters;++ch){
+    st[{"dj","v","I"}]=int64_t(ch-1);active.reset();changes.clear();
+    ev.run("dj","c","()V",{});
+    auto def=jobj();def->v["chapter"]=ji(ch);def->v["mission"]=record_json(active);
+    auto rebels=jarr();std::set<int64_t>unique(changes.begin(),changes.end());for(int64_t x:unique)rebels->v.push_back(ji(x));
+    def->v["rebel_stations"]=ja(rebels);campaign->v.push_back(jo(def));
+
+    auto cy=std::make_shared<Obj>();cy->type="cy";auto ca=std::make_shared<Arr>();ca->v.push_back(Val(std::monostate{}));cy->f["a:[Law;"]=ca;
+    Val evv=ev.run("cy","a","(I)[Ldk;",{Val(cy),int64_t(ch)});
+    auto timeline=jarr();
+    if(std::holds_alternative<std::shared_ptr<Arr>>(evv)){
+      auto aa=std::get<std::shared_ptr<Arr>>(evv);
+      if(aa)for(const auto &v:aa->v){
+        if(std::holds_alternative<std::shared_ptr<Obj>>(v))timeline->v.push_back(record_json(std::get<std::shared_ptr<Obj>>(v)));
+      }
+    }
+    if(!timeline->v.empty())timelines->v[std::to_string(ch)]=ja(timeline);
+  }
+
+  auto strings=jarr();
+  std::vector<std::string>langs;DIR*d=opendir((root+"/data/lang").c_str());
+  if(d){
+    struct dirent*e;while((e=readdir(d))){
+      if(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."))continue;
+      std::string p=root+"/data/lang/"+e->d_name;struct stat stbuf{};
+      if(stat(p.c_str(),&stbuf)==0&&S_ISDIR(stbuf.st_mode))langs.push_back(e->d_name);
+    }
+    closedir(d);
+  }
+  if(langs.empty())fail("This DEEP build does not match the declarative content profile: no localisation");
+  std::sort(langs.begin(),langs.end());
+  std::string lang="en";if(std::find(langs.begin(),langs.end(),"en")==langs.end())lang=langs[0];
+
+  std::vector<std::string>lnames={"main","ships","cargo","items","medals"};
+  for(int i=0;i<chapters-1;++i)lnames.push_back(std::to_string(i));
+  for(auto&n:lnames){
+    Json a=read_lang_file(root+"/data/lang/"+lang+"/"+n+".lang");
+    auto ar=std::get<std::shared_ptr<JsonArr>>(a);for(auto &x:ar->v)strings->v.push_back(x);
+  }
+
+  auto names=jarr();
+  for(const char*g:{"f","m"}){
+    auto a=jarr();std::string raw=read_text(root+"/data/txt/names_human_"+g+".txt");
+    for(char &c:raw)if(c=='\r'||c=='\n'||c=='\t')c=0;
+    std::string clean;for(char c:raw)if(c)clean.push_back(c);
+    for(auto&s:split(clean,';'))if(!s.empty())a->v.push_back(js(s));
+    names->v.push_back(ja(a));
+  }
+
+  int species_count=int(read_tables(root,"creatures",false).size());
+  auto habitats=jarr();
+  int station_count=int(read_tables(root,"stations",true).size());
+  for(int index=0;index<station_count;++index){
+    auto h=jarr();
+    for(int off=0;off<std::min(6,species_count);++off){
+      h->v.push_back(ji((index*7+off*5)%species_count));h->v.push_back(ji(20));
+    }
+    habitats->v.push_back(ja(h));
+  }
+
+  auto out=jobj();
+  out->v["schema"]=ji(1);out->v["jar_sha256"]=js(sha256_file(jar));out->v["importer"]=js("native-6");
+  out->v["language"]=js(lang);out->v["constants"]=jo(constants);out->v["tables"]=table_json(root);
+  out->v["campaign"]=ja(campaign);out->v["timelines"]=jo(timelines);out->v["strings"]=ja(strings);
+  out->v["name_pools"]=ja(names);out->v["habitats"]=ja(habitats);out->v["data_reader"]=js("restricted-class-data-1");
+  out->v["station_geometry"]=jo(jobj());
   std::string s=json_string(jo(out));write_bin(root+"/native-data.json",std::vector<uint8_t>(s.begin(),s.end()));
 }
 
