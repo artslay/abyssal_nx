@@ -317,7 +317,7 @@ static int gd_dir_open(int access_type, const char *path) {
     gd_dirs[i].path,
     sizeof(gd_dirs[i].path),
     "%s",
-    buf
+    open_path
 );
       gd_dirs[i].current[0] = 0;
       mutexUnlock(&gd_dir_lock);
@@ -471,7 +471,7 @@ static int gd_file_open(const char *path, int mode) {
   if (!f) {
     f = fopen(open_path, m);
 #if VERBOSE_IO
-    debugPrintf("[jni] fileOpen(\"%s\" -> \"%s\", %d) = %p\n", path, buf, mode, (void *)f);
+    debugPrintf("[jni] fileOpen(\"%s\" -> \"%s\", %d) = %p\n", path, open_path, mode, (void *)f);
 #endif
     if (!f) return -1;
     setvbuf(f, NULL, _IOFBF, 64 * 1024);
