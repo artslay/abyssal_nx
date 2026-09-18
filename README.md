@@ -20,12 +20,9 @@ Place the following files inside:
 ├── libgodot_android.so
 ├── libc++_shared.so
 ├── config.txt
-├── assets/
-│   ├── project.binary
-│   └── ...
-└── save/
-    ├── content/
-    └── native/
+└── assets/
+    ├── project.binary
+    └── ...
 ```
 
 The Android libraries and game data must be obtained from the original Android version of the game.
@@ -55,7 +52,7 @@ to:
 /switch/abyssal_nx/
 ```
 
-The game data is contained in the APK `assets/` directory.
+The game engine assets are contained in the Android APK `assets/` directory.
 
 Copy the complete `assets/` folder to:
 
@@ -71,21 +68,6 @@ The following file is required:
 
 The original game libraries and game data are not included in this repository.
 
-## Save data
-
-The `content` and `native` folders must be placed inside:
-
-```text
-/switch/abyssal_nx/save/
-```
-
-The resulting structure should be:
-
-```text
-/switch/abyssal_nx/save/
-├── content/
-└── native/
-```
 
 ## JAR import
 
