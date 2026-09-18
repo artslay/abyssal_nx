@@ -87,6 +87,25 @@ The resulting structure should be:
 └── native/
 ```
 
+## JAR import
+
+The Switch port can accept an original DEEP JAR directly from the Import Content file picker.
+
+When a `.jar` is selected, the native importer:
+- validates the MIDlet manifest;
+- extracts and decodes the data resources;
+- evaluates the restricted declarative class-data profile;
+- creates a content pack compatible with the normal `.abyss` installer;
+- caches the generated pack under:
+
+```text
+/switch/abyssal_nx/save/_jar_import/<sha256>.abyss
+```
+
+The JAR itself is never modified.
+
+MIDI and AMR to WAV conversion is not yet included in the native Switch importer. Those resources are therefore not included in the generated content pack until the native audio conversion stage is implemented.
+
 ## Asset pack
 
 The port supports an indexed asset pack for faster loading from the SD card.
