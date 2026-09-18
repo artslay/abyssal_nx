@@ -437,6 +437,13 @@ using Val=std::variant<std::monostate,bool,int64_t,double,std::string,
                        std::shared_ptr<Obj>,std::shared_ptr<Arr>>;
 struct Obj {std::string type;std::map<std::string,Val> f;};
 struct Arr {std::vector<Val> v;};
+static std::string val_string(const Val&v){
+  if(auto p=std::get_if<std::string>(&v))return *p;
+  if(auto p=std::get_if<int64_t>(&v))return std::to_string(*p);
+  if(auto p=std::get_if<bool>(&v))return *p?"True":"False";
+  if(auto p=std::get_if<double>(&v)){char b[64];snprintf(b,sizeof b,"%.17g",*p);return b;}
+  return "";
+}
 
 static bool is_null(const Val &v){return std::holds_alternative<std::monostate>(v);}
 static bool same_ref(const Val&a,const Val&b){
@@ -818,7 +825,7 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
         std::string left;
         auto it=obj?obj->f.find("text"):std::map<std::string,Val>::const_iterator{};
         if(obj&&it!=obj->f.end()&&std::holds_alternative<std::string>(it->second))left=std::get<std::string>(it->second);
-        std::string right=args.empty()?"":(std::holds_alternative<std::string>(args[0])?std::get<std::string>(args[0]):"");
+        std::string right=args.empty()?"":val_string(args[0]);
         if(obj)obj->f["text"]=left+right;
         return obj;
       }
