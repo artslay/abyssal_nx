@@ -276,6 +276,11 @@ void startup_status_update(const char *message) {
   debugPrintf("[pack] %s\n", message ? message : "");
 }
 
+static void switch_keyboard_key(int keycode, int unicode, int key_label, int pressed, int echo) {
+  if (!e_key) return;
+  e_key(fake_env, jni_activity_class(), keycode, unicode, key_label, pressed, echo);
+}
+
 static void resolve_entry_points(void) {
   e_JNI_OnLoad           = (void *)so_try_find_addr_rx(&game_mod, "JNI_OnLoad");
   e_initialize           = (void *)so_find_addr_rx(&game_mod, G "initialize");
@@ -1194,6 +1199,7 @@ int main(void) {
 
   // resolve exports before so_finalize maps the code and locks load_base out
   resolve_entry_points();
+  jni_set_keyboard_callback(switch_keyboard_key);
 
   so_finalize(&cxx_mod);
   so_flush_caches(&cxx_mod);
