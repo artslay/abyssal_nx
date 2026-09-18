@@ -1132,9 +1132,9 @@ static void validate_generated_pack(const std::string &pack,const std::string &r
   auto bindings=read_text(root+"/bindings.json");
   if(native.find("\\"schema\\":1")==std::string::npos||native.find("\\"jar_sha256\\":\\""+jar_sha+"\\"")==std::string::npos||native.find("\\"importer\\":\\"native-6\\"")==std::string::npos)fail("Generated native-data.json is incomplete");
   if(native.find("\\"campaign\\":[")==std::string::npos||native.find("\\"strings\\":[")==std::string::npos)fail("Generated native-data.json has no campaign/string data");
-  if(registry.size()<3||registry.find_first_not_of(" \\t\\r\\n")!=0||registry.find("[ ]")!=std::string::npos||registry=="[]")fail("Generated resource registry is empty");
+  if(registry.size()<3||registry.find_first_not_of(" \t\r\n")!=0||registry.find("[ ]")!=std::string::npos||registry=="[]")fail("Generated resource registry is empty");
   if(bindings.size()<3||bindings=="{}")fail("Generated resource bindings are empty");
-  debugPrintf("[jar] generated pack validated: entries=%u size=%zu registry=%zu\\n",(unsigned)count,raw.size(),registry.size());
+  debugPrintf("[jar] generated pack validated: entries=%u size=%zu registry=%zu\n",(unsigned)count,raw.size(),registry.size());
 }
 
 static void build_pack(const std::string&root,const std::string&jar_sha,const std::string&pack){
