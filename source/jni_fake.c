@@ -28,6 +28,7 @@
 #include "godot_shim.h"
 #include "jar_import.h"
 #include <errno.h>
+#include <switch/applets/swkbd.h>
 
 #define JNI_OK 0
 #define JNI_VERSION_1_6 0x00010006
@@ -532,6 +533,135 @@ static void gd_file_close(int id) {
   mutexUnlock(&gd_file_lock);
 }
 
+// Switch system keyboard -> Godot text/key input callback.
+// Godot's Android text wrapper forwards inserted characters as keycode=0,
+// unicode=<character>, followed by a matching release event.
+static void (*g_keyboard_callback)(int keycode, int unicode, int key_label, int pressed, int echo);
+
+void jni_set_keyboard_callback(void (*cb)(int keycode, int unicode, int key_label, int pressed, int echo)) {
+  g_keyboard_callback = cb;
+}
+
+static int utf8_next(const char *s, size_t *pos, int *out_cp) {
+  const unsigned char *p = (const unsigned char *)s + *pos;
+  if (!*p) return 0;
+  if (*p < 0x80) {
+    *out_cp = *p;
+    (*pos)++;
+    return 1;
+  }
+  if ((*p & 0xe0) == 0xc0 && p[1]) {
+    *out_cp = ((p[0] & 0x1f) << 6) | (p[1] & 0x3f);
+    *pos += 2;
+    return 1;
+  }
+  if ((*p & 0xf0) == 0xe0 && p[1] && p[2]) {
+    *out_cp = ((p[0] & 0x0f) << 12) | ((p[1] & 0x3f) << 6) | (p[2] & 0x3f);
+    *pos += 3;
+    return 1;
+  }
+  if ((*p & 0xf8) == 0xf0 && p[1] && p[2] && p[3]) {
+    *out_cp = ((p[0] & 0x07) << 18) | ((p[1] & 0x3f) << 12) |
+              ((p[2] & 0x3f) << 6) | (p[3] & 0x3f);
+    *pos += 4;
+    return 1;
+  }
+  *out_cp = 0xfffd;
+  (*pos)++;
+  return 1;
+}
+
+static void switch_keyboard_emit_key(int keycode, int unicode, int label, int pressed) {
+  if (g_keyboard_callback)
+    g_keyboard_callback(keycode, unicode, label, pressed, 0);
+}
+
+static void switch_keyboard_emit_text(const char *old_text, int cursor_start, int cursor_end, const char *new_text) {
+  if (!g_keyboard_callback) return;
+
+  size_t old_len = 0, pos = 0;
+  int cp;
+  while (utf8_next(old_text ? old_text : "", &pos, &cp)) old_len++;
+  pos = 0;
+  size_t new_len = 0;
+  while (utf8_next(new_text ? new_text : "", &pos, &cp)) new_len++;
+
+  // Recreate the Android EditText -> Godot flow: remove the previous contents
+  // using normal delete events, then insert the final Switch-keyboard result.
+  if (cursor_start >= 0) {
+    if (cursor_end >= cursor_start && cursor_end != cursor_start)
+      switch_keyboard_emit_key(67, 0, 0, 1), switch_keyboard_emit_key(67, 0, 0, 0);
+    for (int i = cursor_start; i-- > 0;)
+      switch_keyboard_emit_key(67, 0, 0, 1), switch_keyboard_emit_key(67, 0, 0, 0);
+    for (size_t i = old_len - (size_t)(cursor_end >= cursor_start ? cursor_end : cursor_start); i-- > 0;)
+      switch_keyboard_emit_key(112, 0, 0, 1), switch_keyboard_emit_key(112, 0, 0, 0);
+  } else {
+    for (size_t i = old_len; i-- > 0;)
+      switch_keyboard_emit_key(67, 0, 0, 1), switch_keyboard_emit_key(67, 0, 0, 0);
+  }
+
+  (void)new_len;
+  pos = 0;
+  while (utf8_next(new_text ? new_text : "", &pos, &cp)) {
+    if (cp == '\n' && cursor_end < 0) {
+      switch_keyboard_emit_key(66, 0, 0, 1);
+      switch_keyboard_emit_key(66, 0, 0, 0);
+    } else {
+      switch_keyboard_emit_key(0, cp, 0, 1);
+      switch_keyboard_emit_key(0, cp, 0, 0);
+    }
+  }
+}
+
+static void switch_keyboard_show(const char *existing, int type, int max_input_length, int cursor_start, int cursor_end) {
+  SwkbdConfig kbd;
+  char result[0x4000];
+  memset(result, 0, sizeof(result));
+
+  Result rc = swkbdCreate(&kbd, 0);
+  if (R_FAILED(rc)) {
+    debugPrintf("[swkbd] swkbdCreate failed: 0x%x\n", rc);
+    return;
+  }
+
+  if (type == 6) {
+    swkbdConfigMakePresetPassword(&kbd);
+  } else {
+    swkbdConfigMakePresetDefault(&kbd);
+    if (type == 2) {
+      swkbdConfigSetType(&kbd, SwkbdType_NumPad);
+    } else if (type == 3) {
+      swkbdConfigSetType(&kbd, SwkbdType_NumPad);
+      swkbdConfigSetLeftOptionalSymbolKey(&kbd, ".");
+      swkbdConfigSetRightOptionalSymbolKey(&kbd, "-");
+    } else if (type == 4) {
+      swkbdConfigSetType(&kbd, SwkbdType_Normal);
+    } else if (type == 1) {
+      swkbdConfigSetType(&kbd, SwkbdType_QWERTY);
+      swkbdConfigSetReturnButtonFlag(&kbd, 1);
+    } else {
+      swkbdConfigSetType(&kbd, SwkbdType_QWERTY);
+    }
+  }
+
+  swkbdConfigSetInitialText(&kbd, existing ? existing : "");
+  swkbdConfigSetInitialCursorPos(&kbd, 1);
+  if (max_input_length > 0) {
+    swkbdConfigSetStringLenMax(&kbd, (u32)max_input_length);
+  }
+  swkbdConfigSetBlurBackground(&kbd, 1);
+
+  rc = swkbdShow(&kbd, result, sizeof(result));
+  swkbdClose(&kbd);
+
+  if (R_SUCCEEDED(rc)) {
+    debugPrintf("[swkbd] accepted text (len=%zu)\n", strlen(result));
+    switch_keyboard_emit_text(existing, cursor_start, cursor_end, result);
+  } else {
+    debugPrintf("[swkbd] cancelled: 0x%x\n", rc);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // method dispatch (by name + signature; instance and static share handlers).
 // varargs follow AAPCS64: jint -> int, jlong -> int64_t, jfloat/jdouble ->
@@ -804,8 +934,20 @@ static void call_void(void *recv, FakeID *id, va_list va) {
     return;
   }
 #endif
-  // everything else (lifecycle notifications, vibrate, keyboard, immersive
-  // mode, benchmarks, TTS, multicast locks, ...) is a safe no-op
+  if (!strcmp(name, "showKeyboard")) {
+    const char *existing = obj_str(va_arg(va, void *));
+    int type = va_arg(va, int);
+    int max_input_length = va_arg(va, int);
+    int cursor_start = va_arg(va, int);
+    int cursor_end = va_arg(va, int);
+    switch_keyboard_show(existing, type, max_input_length, cursor_start, cursor_end);
+    return;
+  }
+  if (!strcmp(name, "hideKeyboard")) {
+    return;
+  }
+  // everything else (lifecycle notifications, vibrate, immersive mode,
+  // benchmarks, TTS, multicast locks, ...) is a safe no-op
 }
 
 static float call_float(void *recv, FakeID *id, va_list va) {
