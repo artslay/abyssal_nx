@@ -679,7 +679,9 @@ static DecodedModel micro_model(const std::vector<uint8_t> &data){
   else if(vf==2){while(vertices.size()<size_t(nv)*3){int ch=r.bits(8);int count=((ch&63)+1)*3;if(vertices.size()+count>size_t(nv)*3)fail("Oversized vertex block");int width[]={8,10,13,16}[ch>>6];for(int i=0;i<count;++i)vertices.push_back(int32_t(r.bits(width,true)));}}
   else fail("Unsupported vertex encoding");
   r.align();std::vector<int64_t> normals;if(nf==1){normals.resize(size_t(nv)*3);for(auto &x:normals)x=r.s16();}
-  else if(nf==2){for(int i=0;i<nv;++i){int x=r.bits(7);if(x==64){int kind=r.bits(3);if(kind>5)fail("Invalid normal");int z[]={0,0,64,0,0,-64,0,0}[kind],y[]={0,0,64,0,0,-64,0,0}[kind+1],xx[]={0,0,64,0,0,-64,0,0}[kind+2];normals.insert(normals.end(),{xx,y,z});}else{x=(x&64)?x-128:x;int y=r.bits(7,true);int sign=r.bits(1);int z=int(std::floor(std::sqrt(double(std::max(0,4096-x*x-y*y)))+.5))*(sign?-1:1);normals.insert(normals.end(),{x,y,z});}}}
+  else if(nf==2){for(int i=0;i<nv;++i){int x=r.bits(7);if(x==64){int kind=r.bits(3);if(kind>5)fail("Invalid normal");static const int normal_axis[]={0,0,64,0,0,-64,0,0};
+int z=normal_axis[kind],y=normal_axis[kind+1],xx=normal_axis[kind+2];
+normals.insert(normals.end(),{xx,y,z});}else{x=(x&64)?x-128:x;int y=r.bits(7,true);int sign=r.bits(1);int z=int(std::floor(std::sqrt(double(std::max(0,4096-x*x-y*y)))+.5))*(sign?-1:1);normals.insert(normals.end(),{x,y,z});}}}
   else if(nf!=0)fail("Unsupported normal encoding");r.align();
   struct Poly{std::vector<int> indices;std::vector<int> attr;int texture=-1;int pattern=0;int blend=0;bool double_sided=false;};
   auto polygon=[&](const std::vector<int>&ind,const std::vector<int>&attr,int material,int face){
