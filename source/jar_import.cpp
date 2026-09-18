@@ -388,62 +388,265 @@ struct Rdr {
 
 struct CP { int tag=0; std::variant<std::monostate,int64_t,double,std::string,uint16_t,std::pair<uint16_t,uint16_t>> v; };
 
-struct Member {uint16_t flags=0;std::map<std::string,std::vector<uint8_t>> attrs;};
-
 struct ClassData {
-  std::vector<CP> pool;std::map<std::pair<std::string,std::string>,Member> fields,methods;std::string name;
+  std::vector<CP> pool;
+  std::map<std::pair<std::string,std::string>,Member> fields,methods;
+  std::string name;
 
   explicit ClassData(const std::vector<uint8_t> &raw){
-    Rdr r(raw);if(r.u4()!=0xcafebabeu)fail("Invalid class magic");r.u2();r.u2();uint16_t n=r.u2();pool.resize(n);size_t i=1;
-    while(i<n){int tag=r.u1();pool[i].tag=tag;
+    Rdr r(raw);
+    uint16_t minor=r.u2();uint16_t major=r.u2();
+    uint16_t n=r.u2();
+    if(n<2)fail("Invalid constant pool count");
+    pool.resize(n);
+    size_t i=1;
+    while(i<n){
+      uint8_t tag=r.u1();pool[i].tag=tag;
       switch(tag){
-        case 1:{auto x=r.take(r.u2());pool[i].v=mutf8(x);break;}
-        case 3:pool[i].v=int64_t(int32_t(r.u4()));break;
-        case 4:{uint32_t b=r.u4();float f;memcpy(&f,&b,4);pool[i].v=double(f);break;}
-        case 5:{uint64_t hi=r.u4(),lo=r.u4();pool[i].v=int64_t((hi<<32)|lo);break;}
-        case 6:{uint64_t hi=r.u4(),lo=r.u4(),b=(hi<<32)|lo;double d;memcpy(&d,&b,8);pool[i].v=d;break;}
-        case 7:case 8:case 16:case 19:case 20:pool[i].v=r.u2();break;
-        case 9:case 10:case 11:case 12:case 17:case 18:pool[i].v=std::make_pair(r.u2(),r.u2());break;
-        case 15:{r.u1();pool[i].v=r.u2();break;}
-        default:fail("Unsupported constant tag");
+        case 1:{
+          uint16_t len=r.u2();
+          pool[i].v=mutf8(r.take(len));
+          break;
+        }
+        case 3:
+          pool[i].v=int64_t(int32_t(r.u4()));
+          break;
+        case 4:{
+          uint32_t b=r.u4();float f;memcpy(&f,&b,4);
+          pool[i].v=double(f);
+          break;
+        }
+        case 5:{
+          uint64_t hi=r.u4(),lo=r.u4();
+          pool[i].v=int64_t((hi<<32)|lo);
+          if(i+1>=n)fail("Truncated long constant at #"+std::to_string(i));
+          ++i;
+          break;
+        }
+        case 6:{
+          uint64_t hi=r.u4(),lo=r.u4(),b=(hi<<32)|lo;double d;
+          memcpy(&d,&b,8);pool[i].v=d;
+          if(i+1>=n)fail("Truncated double constant at #"+std::to_string(i));
+          ++i;
+          break;
+        }
+        case 7:
+        case 8:
+        case 16:
+        case 19:
+        case 20:
+          pool[i].v=r.u2();
+          break;
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+        case 17:
+        case 18:
+          pool[i].v=std::make_pair(r.u2(),r.u2());
+          break;
+        case 15:{
+          uint16_t kind=r.u1(),ref=r.u2();
+          pool[i].v=std::make_pair(kind,ref);
+          break;
+        }
+        default:
+          fail("Unsupported constant tag "+std::to_string(tag)+" at #"+std::to_string(i));
       }
-      i+=(tag==5||tag==6)?2:1;
+      ++i;
     }
-    r.u2();uint16_t this_class=r.u2();name=constant_str(this_class);r.u2();uint16_t interfaces=r.u2();for(uint16_t j=0;j<interfaces;++j)r.u2();
-    fields=members(r);methods=members(r);auto a=attrs(r);if(r.p!=raw.size())fail("Trailing class data");(void)a;
+
+    validate_pool();
+    r.u2();
+    uint16_t this_class=r.u2();
+    uint16_t super_class=r.u2();
+    name=class_name(this_class,"this_class");
+    if(super_class)class_name(super_class,"super_class");
+
+    uint16_t interfaces=r.u2();
+    for(uint16_t j=0;j<interfaces;++j)
+      class_name(r.u2(),"interface");
+
+    fields=members(r);
+    methods=members(r);
+    auto a=attrs(r);
+    if(r.p!=raw.size())fail("Trailing class data in "+name);
+    (void)a;
+    debugPrintf("[jar] class %s parsed (major=%u minor=%u cp=%u)\\n",
+                name.c_str(),unsigned(major),unsigned(minor),unsigned(n));
+  }
+
+  const CP &constant(uint16_t idx,const char *where="constant")const{
+    if(idx==0)fail("Bad constant index 0 in "+name+" ("+where+")");
+    if(idx>=pool.size())fail("Bad constant index "+std::to_string(idx)+" in "+name+" ("+where+")");
+    if(pool[idx].tag==0)fail("Invalid constant pool hole #"+std::to_string(idx)+" in "+name+" ("+where+")");
+    return pool[idx];
+  }
+
+  const std::string &utf8(uint16_t idx,const char *where="UTF-8")const{
+    const CP &c=constant(idx,where);
+    if(c.tag!=1)fail("Constant #"+std::to_string(idx)+" in "+name+" ("+where+") is not UTF-8");
+    return std::get<std::string>(c.v);
+  }
+
+  std::string class_name(uint16_t idx,const char *where="Class")const{
+    const CP &c=constant(idx,where);
+    if(c.tag!=7)fail("Constant #"+std::to_string(idx)+" in "+name+" ("+where+") is not Class");
+    uint16_t ni=std::get<uint16_t>(c.v);
+    return utf8(ni,"Class.name");
+  }
+
+  std::string constant_str(uint16_t idx,const char *where="string")const{
+    const CP &c=constant(idx,where);
+    if(c.tag==1)return std::get<std::string>(c.v);
+    if(c.tag==7)return class_name(idx,where);
+    if(c.tag==8){
+      uint16_t ni=std::get<uint16_t>(c.v);
+      return utf8(ni,"String.string_index");
+    }
+    if(c.tag==16){
+      uint16_t di=std::get<uint16_t>(c.v);
+      return utf8(di,"MethodType.descriptor_index");
+    }
+    if(c.tag==19){
+      uint16_t ni=std::get<uint16_t>(c.v);
+      return utf8(ni,"Module.name_index");
+    }
+    if(c.tag==20){
+      uint16_t ni=std::get<uint16_t>(c.v);
+      return utf8(ni,"Package.name_index");
+    }
+    fail("Constant #"+std::to_string(idx)+" in "+name+" ("+where+") is not string-like");
+    return "";
+  }
+
+  void validate_index(uint16_t idx,const char *where)const{
+    if(idx==0||idx>=pool.size()||pool[idx].tag==0)
+      fail("Bad constant index "+std::to_string(idx)+" in "+name+" ("+where+")");
+  }
+
+  void validate_tag(uint16_t idx,int tag,const char *where)const{
+    validate_index(idx,where);
+    if(pool[idx].tag!=tag)
+      fail("Constant #"+std::to_string(idx)+" in "+name+" ("+where+") has tag "+
+           std::to_string(pool[idx].tag)+", expected "+std::to_string(tag));
+  }
+
+  void validate_pool()const{
+    for(size_t i=1;i<pool.size();++i){
+      const CP &c=pool[i];
+      switch(c.tag){
+        case 0:
+          break;
+        case 1:
+        case 3:
+        case 4:
+          break;
+        case 5:
+        case 6:
+          if(i+1>=pool.size()||pool[i+1].tag!=0)
+            fail("Invalid reserved constant-pool slot after #"+std::to_string(i)+" in "+name);
+          ++i;
+          break;
+        case 7:
+        case 8:
+        case 16:
+        case 19:
+        case 20:
+          validate_tag(std::get<uint16_t>(c.v),1,
+                        c.tag==7?"Class.name_index":
+                        c.tag==8?"String.string_index":
+                        c.tag==16?"MethodType.descriptor_index":
+                        c.tag==19?"Module.name_index":"Package.name_index");
+          break;
+        case 9:
+        case 10:
+        case 11:{
+          auto q=std::get<std::pair<uint16_t,uint16_t>>(c.v);
+          validate_tag(q.first,7,"memberref.class_index");
+          validate_tag(q.second,12,"memberref.name_and_type_index");
+          break;
+        }
+        case 12:{
+          auto q=std::get<std::pair<uint16_t,uint16_t>>(c.v);
+          validate_tag(q.first,1,"NameAndType.name_index");
+          validate_tag(q.second,1,"NameAndType.descriptor_index");
+          break;
+        }
+        case 15:{
+          auto q=std::get<std::pair<uint16_t,uint16_t>>(c.v);
+          if(q.first<1||q.first>9)fail("Invalid MethodHandle reference kind "+std::to_string(q.first)+" in "+name);
+          validate_index(q.second,"MethodHandle.reference_index");
+          int t=pool[q.second].tag;
+          bool ok=false;
+          if(q.first==1)ok=(t==9);
+          else if(q.first>=2&&q.first<=4)ok=(t==10);
+          else if(q.first==5||q.first==8)ok=(t==10||t==11);
+          else if(q.first==6||q.first==7)ok=(t==10||t==11);
+          else if(q.first==9)ok=(t==11);
+          if(!ok)fail("Invalid MethodHandle target #"+std::to_string(q.second)+" in "+name);
+          break;
+        }
+        case 17:
+        case 18:{
+          auto q=std::get<std::pair<uint16_t,uint16_t>>(c.v);
+          validate_tag(q.second,12,c.tag==17?"Dynamic.name_and_type_index":"InvokeDynamic.name_and_type_index");
+          break;
+        }
+        default:
+          fail("Unsupported constant tag "+std::to_string(c.tag)+" at #"+std::to_string(i)+" in "+name);
+      }
+    }
   }
 
   std::map<std::string,std::vector<uint8_t>> attrs(Rdr &r){
-    std::map<std::string,std::vector<uint8_t>> out;uint16_t n=r.u2();
-    for(uint16_t i=0;i<n;++i){std::string name=constant_str(r.u2());out[name]=r.take(r.u4());}
+    std::map<std::string,std::vector<uint8_t>> out;
+    uint16_t n=r.u2();
+    for(uint16_t i=0;i<n;++i){
+      uint16_t name_idx=r.u2();
+      std::string attr_name=utf8(name_idx,"attribute_name_index");
+      out[attr_name]=r.take(r.u4());
+    }
     return out;
   }
+
   std::map<std::pair<std::string,std::string>,Member> members(Rdr &r){
-    std::map<std::pair<std::string,std::string>,Member> out;uint16_t n=r.u2();
-    for(uint16_t i=0;i<n;++i){Member m;m.flags=r.u2();std::string name=constant_str(r.u2()),desc=constant_str(r.u2());m.attrs=attrs(r);out[{name,desc}]=std::move(m);}
+    std::map<std::pair<std::string,std::string>,Member> out;
+    uint16_t n=r.u2();
+    for(uint16_t i=0;i<n;++i){
+      Member m;
+      m.flags=r.u2();
+      uint16_t name_idx=r.u2(),desc_idx=r.u2();
+      std::string mn=utf8(name_idx,"member.name_index");
+      std::string md=utf8(desc_idx,"member.descriptor_index");
+      m.attrs=attrs(r);
+      out[{mn,md}]=std::move(m);
+    }
     return out;
   }
-  std::string constant_str(uint16_t idx)const{
-    if(idx==0||idx>=pool.size())fail("Bad constant index");
-    const CP &c=pool[idx];
-    if(c.tag==1)return std::get<std::string>(c.v);
-    if(c.tag==7||c.tag==8||c.tag==16||c.tag==19||c.tag==20)return constant_str(std::get<uint16_t>(c.v));
-    fail("Constant is not a string");return "";
-  }
-  CP constant(uint16_t idx)const{
-    if(idx==0||idx>=pool.size())fail("Bad constant index");
-    return pool[idx];
-  }
+
   std::tuple<std::string,std::string,std::string> reference(uint16_t idx)const{
-    auto p=std::get<std::pair<uint16_t,uint16_t>>(constant(idx).v);
-    auto owner=constant_str(std::get<uint16_t>(constant(p.first).v));
-    auto q=std::get<std::pair<uint16_t,uint16_t>>(constant(p.second).v);
-    return {owner,constant_str(q.first),constant_str(q.second)};
+    const CP &c=constant(idx,"bytecode reference");
+    if(c.tag!=9&&c.tag!=10&&c.tag!=11)
+      fail("Constant #"+std::to_string(idx)+" in "+name+" is not a member reference");
+    auto q=std::get<std::pair<uint16_t,uint16_t>>(c.v);
+    std::string owner=class_name(q.first,"memberref.class_index");
+    const CP &nt=constant(q.second,"memberref.name_and_type_index");
+    if(nt.tag!=12)fail("Constant #"+std::to_string(q.second)+" in "+name+" is not NameAndType");
+    auto nq=std::get<std::pair<uint16_t,uint16_t>>(nt.v);
+    return {owner,utf8(nq.first,"NameAndType.name_index"),utf8(nq.second,"NameAndType.descriptor_index")};
   }
+
   std::pair<std::vector<uint8_t>,uint16_t> code(const std::string &name,const std::string &desc)const{
-    auto it=methods.find({name,desc});if(it==methods.end())fail("Missing method "+name+desc);
-    auto ai=it->second.attrs.find("Code");if(ai==it->second.attrs.end())fail("Method has no code "+name+desc);
-    Rdr r(ai->second);r.u2();uint16_t locals=r.u2();uint32_t n=r.u4();return {r.take(n),locals};
+    auto it=methods.find({name,desc});
+    if(it==methods.end())fail("Missing method "+name+desc+" in "+this->name);
+    auto ai=it->second.attrs.find("Code");
+    if(ai==it->second.attrs.end())fail("Method has no code "+name+desc+" in "+this->name);
+    Rdr r(ai->second);
+    uint16_t max_stack=r.u2();uint16_t locals=r.u2();uint32_t n=r.u4();
+    (void)max_stack;
+    if(uint64_t(r.p)+n>ai->second.size())fail("Invalid Code attribute "+name+desc+" in "+this->name);
+    return {r.take(n),locals};
   }
 };
 
@@ -519,7 +722,7 @@ struct Evaluator {
   Val constant_value(const ClassData &c,uint16_t idx){
     CP x=c.constant(idx);
     switch(x.tag){
-      case 1:case 7:case 8:case 16:case 19:case 20:return c.constant_str(idx);
+      case 1:case 7:case 8:case 16:case 19:case 20:return c.constant_str(idx,"ldc string-like constant");
       case 3:case 5:return std::get<int64_t>(x.v);
       case 4:case 6:return std::get<double>(x.v);
       default:fail("Unsupported constant value");
@@ -1074,7 +1277,7 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
   }
 
   auto out=jobj();
-  out->v["schema"]=ji(1);out->v["jar_sha256"]=js(sha256_file(jar));out->v["importer"]=js("native-6");
+  out->v["schema"]=ji(1);out->v["jar_sha256"]=js(sha256_file(jar));out->v["importer"]=js("native-7");
   out->v["language"]=js(lang);out->v["constants"]=jo(constants);out->v["tables"]=table_json(root);
   out->v["campaign"]=ja(campaign);out->v["timelines"]=jo(timelines);out->v["strings"]=ja(strings);
   out->v["name_pools"]=ja(names);out->v["habitats"]=ja(habitats);out->v["data_reader"]=js("restricted-class-data-1");
@@ -1140,7 +1343,7 @@ static void validate_generated_pack(const std::string &pack,const std::string &r
   auto native=read_text(root+"/native-data.json");
   auto registry=read_text(root+"/resource_registry.json");
   auto bindings=read_text(root+"/bindings.json");
-  if(native.find("\"schema\":1")==std::string::npos||native.find("\"jar_sha256\":\""+jar_sha+"\"")==std::string::npos||native.find("\"importer\":\"native-6\"")==std::string::npos)fail("Generated native-data.json is incomplete");
+  if(native.find("\"schema\":1")==std::string::npos||native.find("\"jar_sha256\":\""+jar_sha+"\"")==std::string::npos||native.find("\"importer\":\"native-7\"" )==std::string::npos)fail("Generated native-data.json is incomplete");
   if(native.find("\"campaign\":[")==std::string::npos||native.find("\"strings\":[")==std::string::npos)fail("Generated native-data.json has no campaign/string data");
   if(registry.size()<3||registry.find_first_not_of(" \t\r\n")!=0||registry.find("[ ]")!=std::string::npos||registry=="[]")fail("Generated resource registry is empty");
   if(bindings.size()<3||bindings=="{}")fail("Generated resource bindings are empty");
@@ -1158,7 +1361,7 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
   if(!jar_path||!cache_root||!out||!out_size){g_error="Invalid importer arguments";return 0;}
   try{
     long size=0;FILE*f=fopen(jar_path,"rb");if(!f)fail("Cannot open JAR");fseek(f,0,SEEK_END);size=ftell(f);fclose(f);if(size<0||size>16*1024*1024)fail("JAR exceeds 16 MiB.");
-    std::string digest=sha256_file(jar_path);std::string base=std::string(cache_root)+"/_jar_import_v3";std::string pack=base+"/"+digest+".abyss";
+    std::string digest=sha256_file(jar_path);std::string base=std::string(cache_root)+"/_jar_import_v4";std::string pack=base+"/"+digest+".abyss";
     if(!file_exists(pack)){debugPrintf("[jar] cache miss: %s\n",pack.c_str());std::string work=base+"/"+digest+".work";remove_tree(work);mkdir_recursive(work);extract_jar(jar_path,work);build_pack(work,digest,pack);validate_generated_pack(pack,work,digest);remove_tree(work);}else debugPrintf("[jar] cache hit: %s\n",pack.c_str());
     if(!file_exists(pack))fail("Native JAR converter did not create a content pack");
     if(pack.size()+1>out_size)fail("Converted pack path is too long");
