@@ -65,6 +65,12 @@ static uint8_t s_tls_block[0x1000] __attribute__((aligned(16)));
 // (tpidr_el0 == 0 -- the engine's Vulkan render/worker threads). no_stack_protector
 // so this function never reads the canary it is about to install.
 __attribute__((no_stack_protector))
+static void heal_stack_guard(void) {
+  *(uint64_t *)(s_tls_block + 0x28) = 0x0123456789ABCDEFull;
+  armSetTlsRw(s_tls_block);
+}
+
+__attribute__((no_stack_protector))
 int debugPrintf(char *text, ...) {
 #if DEBUG_LOG
   va_list list;
@@ -89,8 +95,7 @@ int debugPrintf(char *text, ...) {
 }
 
 void tls_setup_guard(void) {
-  *(uint64_t *)(s_tls_block + 0x28) = 0x0123456789ABCDEFull;
-  armSetTlsRw(s_tls_block);
+  heal_stack_guard();
 }
 
 // boost the CPU to 1785MHz while loading
