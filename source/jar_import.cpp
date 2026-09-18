@@ -1104,7 +1104,7 @@ static void collect_files(const std::string&dir,const std::string&rel,std::vecto
   DIR*d=opendir(dir.c_str());if(!d)return;struct dirent*e;while((e=readdir(d))){if(e->d_name[0]=='.')continue;std::string full=dir+"/"+e->d_name,r=rel.empty()?e->d_name:rel+"/"+e->d_name;struct stat st{};if(stat(full.c_str(),&st))continue;if(S_ISDIR(st.st_mode))collect_files(full,r,out);else out.push_back(r);}closedir(d);
 }
 
-static void validate_generated_pack(const std::string &pack,const std::string &root){
+static void validate_generated_pack(const std::string &pack,const std::string &root,const std::string &jar_sha){
   auto raw=read_all(pack,128u*1024u*1024u);
   if(raw.size()<22)fail("Generated content pack is too small");
   size_t end=raw.size()-22;
@@ -1149,7 +1149,7 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
   try{
     long size=0;FILE*f=fopen(jar_path,"rb");if(!f)fail("Cannot open JAR");fseek(f,0,SEEK_END);size=ftell(f);fclose(f);if(size<0||size>16*1024*1024)fail("JAR exceeds 16 MiB.");
     std::string digest=sha256_file(jar_path);std::string base=std::string(cache_root)+"/_jar_import_v3";std::string pack=base+"/"+digest+".abyss";
-    if(!file_exists(pack)){std::string work=base+"/"+digest+".work";remove_tree(work);mkdir_recursive(work);extract_jar(jar_path,work);build_pack(work,digest,pack);validate_generated_pack(pack,work);remove_tree(work);}
+    if(!file_exists(pack)){std::string work=base+"/"+digest+".work";remove_tree(work);mkdir_recursive(work);extract_jar(jar_path,work);build_pack(work,digest,pack);validate_generated_pack(pack,work,digest);remove_tree(work);}
     if(!file_exists(pack))fail("Native JAR converter did not create a content pack");
     if(pack.size()+1>out_size)fail("Converted pack path is too long");
     snprintf(out,out_size,"%s",pack.c_str());
