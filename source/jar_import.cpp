@@ -1284,7 +1284,7 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
   }
 
   auto out=jobj();
-  out->v["schema"]=ji(1);out->v["jar_sha256"]=js(sha256_file(jar));out->v["importer"]=js("native-7");
+  out->v["schema"]=ji(1);out->v["jar_sha256"]=js(sha256_file(jar));out->v["importer"]=js("native-6");
   out->v["language"]=js(lang);out->v["constants"]=jo(constants);out->v["tables"]=table_json(root);
   out->v["campaign"]=ja(campaign);out->v["timelines"]=jo(timelines);out->v["strings"]=ja(strings);
   out->v["name_pools"]=ja(names);out->v["habitats"]=ja(habitats);out->v["data_reader"]=js("restricted-class-data-1");
@@ -1368,7 +1368,7 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
   if(!jar_path||!cache_root||!out||!out_size){g_error="Invalid importer arguments";return 0;}
   try{
     long size=0;FILE*f=fopen(jar_path,"rb");if(!f)fail("Cannot open JAR");fseek(f,0,SEEK_END);size=ftell(f);fclose(f);if(size<0||size>16*1024*1024)fail("JAR exceeds 16 MiB.");
-    std::string digest=sha256_file(jar_path);std::string base=std::string(cache_root)+"/_jar_import_v4";std::string pack=base+"/"+digest+".abyss";
+    std::string digest=sha256_file(jar_path);std::string base=std::string(cache_root)+"/_jar_import_v5";std::string pack=base+"/"+digest+".abyss";
     if(!file_exists(pack)){debugPrintf("[jar] cache miss: %s\n",pack.c_str());std::string work=base+"/"+digest+".work";remove_tree(work);mkdir_recursive(work);extract_jar(jar_path,work);build_pack(work,digest,pack);validate_generated_pack(pack,work,digest);remove_tree(work);}else debugPrintf("[jar] cache hit: %s\n",pack.c_str());
     if(!file_exists(pack))fail("Native JAR converter did not create a content pack");
     if(pack.size()+1>out_size)fail("Converted pack path is too long");
