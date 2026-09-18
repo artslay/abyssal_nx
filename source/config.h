@@ -9,7 +9,7 @@
 #define SO_NAME "libgodot_android.so"
 #define CXX_SO_NAME "libc++_shared.so"
 #define CONFIG_NAME "config.txt"
-#define LOG_NAME "galaxian_debug.log"
+#define LOG_NAME "abyssal_debug.log"
 
 // '/'-absolute paths resolved against the default sdmc device. DATA_ROOT holds
 // the app tree the user prepared under /switch/galaxian_nx/
@@ -19,7 +19,7 @@
 #define DEFAULT_SAVE_ROOT "/switch/galaxian_nx/save"
 
 // absolute so the log lands in the app dir regardless of the launch CWD
-#define LOG_PATH DEFAULT_DATA_ROOT "/galaxian_debug.log"
+#define LOG_PATH "/switch/abyssal_nx/abyssal_debug.log"
 
 // Master debug switch: log file (<data_root>/galaxian_debug.log), boot_stats.txt,
 // nxlink stdout, and all debugPrintf/[io]/[audio] output. Set to 1 to diagnose
