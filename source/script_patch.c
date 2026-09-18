@@ -121,6 +121,12 @@ static const ConstPatch k_save_load[] = {
  * use_native_dialog=false. On Switch there is no Android native picker,
  * so we disable only this property.
  */
+static const ConstPatch k_file_access_const[] = {
+  { "*.abyss ; Private Abyssal content pack ; application/octet-stream,application/zip",
+    "*.jar,*.abyss ; Abyssal content pack   ; application/octet-stream,application/zip",
+    0.0, 0.0, 1 },
+};
+
 static const BoolPropertyPatch k_file_access_bool[] = {
   { "use_native_dialog", 1, 0 },
 };
@@ -145,8 +151,8 @@ static const ScriptPatch k_scripts[] = {
   {
     "native/platform/file_access.gdc",
     "file_access.gdc",
-    NULL,
-    0,
+    k_file_access_const,
+    1,
     k_file_access_bool,
     1
   },
