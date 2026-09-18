@@ -29,7 +29,7 @@ CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -DSHIM_CALL_ONCE=1 -fno-stack-protector
 
-CXXFLAGS	:= $(CFLAGS)
+CXXFLAGS	:= $(CFLAGS) -std=gnu++17
 
 ASFLAGS	:=	-g $(ARCH)
 # libGLESv1_CM and libGLESv2 (mesa) both define the common GL entry points
