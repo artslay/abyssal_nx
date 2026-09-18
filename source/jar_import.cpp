@@ -948,7 +948,15 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
     if(std::holds_alternative<std::shared_ptr<Arr>>(evv)){
       auto aa=std::get<std::shared_ptr<Arr>>(evv);
       if(aa)for(const auto &v:aa->v){
-        if(std::holds_alternative<std::shared_ptr<Obj>>(v))timeline->v.push_back(record_json(std::get<std::shared_ptr<Obj>>(v)));
+        if(std::holds_alternative<std::shared_ptr<Obj>>(v)){
+          auto event=std::get<std::shared_ptr<Obj>>(v);auto eo=jobj();
+          if(event){
+            for(const char *k:{"text_id","speaker","kind","values"}){
+              auto fi=event->f.find(k);if(fi!=event->f.end())eo->v[k]=val_json(fi->second);
+            }
+          }
+          timeline->v.push_back(jo(eo));
+        }
       }
     }
     if(!timeline->v.empty())timelines->v[std::to_string(ch)]=ja(timeline);
