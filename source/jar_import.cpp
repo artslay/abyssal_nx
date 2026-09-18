@@ -661,8 +661,39 @@ normals.insert(normals.end(),{xx,y,z});}else{x=(x&64)?x-128:x;int y=r.bits(7,tru
     }}
   r.align();std::array<int,4> cursor={0,c3,0,t3};for(size_t pi=0;pi<patterns.size();++pi){int pat=pi==0?0:int(1u<<(pi%32));for(int face=0;face<2;++face)for(int kind=0;kind<2;++kind){int count=patterns[pi][face][kind],slot=kind+(face?2:0);for(int q=0;q<count;++q){std::vector<Poly>*arr=face?&textured:&colored;if(cursor[slot]>=int(arr->size()))fail("Invalid pattern counts");(*arr)[cursor[slot]].pattern=pat;if(face)(*arr)[cursor[slot]].texture=face-1;cursor[slot]++;}}}
   struct Bone{int vertices=0,parent=-1;std::vector<double> matrix;};std::vector<Bone>bones;for(int i=0;i<nb;++i){Bone b;b.vertices=r.u16();b.parent=r.s16();if(b.parent<-1||b.parent>=i)fail("Invalid bone parent");b.matrix=r.matrix();bones.push_back(std::move(b));}int sum=0;for(auto &b:bones)sum+=b.vertices;if(sum!=nv)fail("Invalid bone vertex blocks");
+  std::vector<double> geometry;
+  if(nv>0){
+    std::vector<std::vector<double>> world;world.reserve(bones.size());
+    for(size_t bi=0;bi<bones.size();++bi){
+      const auto &b=bones[bi];std::vector<double> m=b.matrix;
+      if(b.parent>=0){
+        const auto &a=world[size_t(b.parent)];m.assign(12,0);
+        for(int row=0;row<3;++row)for(int col=0;col<4;++col){
+          double v=(col==3)?a[row*4+3]:0;
+          for(int k=0;k<3;++k)v+=a[row*4+k]*b.matrix[k*4+col];
+          m[row*4+col]=v;
+        }
+      }
+      world.push_back(std::move(m));
+    }
+    std::array<double,3> low={INFINITY,INFINITY,INFINITY},high={-INFINITY,-INFINITY,-INFINITY};
+    size_t cursor=0;
+    for(size_t bi=0;bi<bones.size();++bi){
+      const auto &b=bones[bi];const auto &m=world[bi];
+      for(int n=0;n<b.vertices;++n){
+        if(cursor+2>=vertices.size())fail("Invalid bone vertex range");
+        double x=double(vertices[cursor++]),y=double(vertices[cursor++]),z=double(vertices[cursor++]);
+        double p[3]={m[0]*x+m[1]*y+m[2]*z+m[3],m[4]*x+m[5]*y+m[6]*z+m[7],m[8]*x+m[9]*y+m[10]*z+m[11]};
+        for(int axis=0;axis<3;++axis){low[axis]=std::min(low[axis],p[axis]);high[axis]=std::max(high[axis],p[axis]);}
+      }
+    }
+    if(cursor!=vertices.size())fail("Invalid bone vertex blocks");
+    geometry={(low[0]+high[0])/2.0,(low[1]+high[1])/2.0,(low[2]+high[2])/2.0,
+              std::max(500.0,(high[0]-low[0])/2.0),std::max(500.0,(high[1]-low[1])/2.0),
+              std::max(500.0,(high[2]-low[2])/2.0)};
+  }
   auto root=jobj();root->v["vertices"]=mesh_vec_i(vertices);root->v["normals"]=mesh_vec_i(normals);auto polys=jarr();auto emit_poly=[&](const Poly&p){auto o=jobj();auto ind=jarr();for(int x:p.indices)ind->v.push_back(ji(x));o->v["indices"]=ja(ind);auto at=jarr();for(int x:p.attr)at->v.push_back(ji(x));o->v["attributes"]=ja(at);o->v["texture"]=ji(p.texture);o->v["pattern"]=ji(p.pattern);o->v["blend"]=ji(p.blend);o->v["double_sided"]=p.double_sided;polys->v.push_back(jo(o));};for(auto&p:textured)emit_poly(p);for(auto&p:colored)emit_poly(p);root->v["polygons"]=ja(polys);auto barr=jarr();for(auto&b:bones){auto o=jobj();o->v["vertices"]=ji(b.vertices);o->v["parent"]=ji(b.parent);o->v["matrix"]=mesh_vec(b.matrix);barr->v.push_back(jo(o));}root->v["bones"]=ja(barr);root->v["patterns"]=ji(np);
-  return {root,{}};
+  return {root,{{"__geometry",geometry}}};
 }
 
 static Json micro_animation(const std::vector<uint8_t>&data){
@@ -670,12 +701,13 @@ static Json micro_animation(const std::vector<uint8_t>&data){
   auto ID=[](){return std::vector<double>{1,0,0,0,0,1,0,0,0,0,1,0};};
   auto sample=[&](const std::vector<std::pair<int,std::vector<double>>>&tr,int frame){if(frame>=tr.back().first)return tr.back().second;for(int i=int(tr.size())-2;i>=0;--i)if(frame>=tr[i].first){double a=double(frame-tr[i].first)/double(tr[i+1].first-tr[i].first);std::vector<double>v;for(size_t j=0;j<tr[i].second.size();++j)v.push_back(tr[i].second[j]+(tr[i+1].second[j]-tr[i].second[j])*a);return v;}return std::vector<double>(tr[0].second.size(),0);};
   auto track=[&](int width=3,double factor=1.0){int count=r.u16();if(count<1||count>4096)fail("Invalid animation track");std::vector<std::pair<int,std::vector<double>>> v;for(int i=0;i<count;++i){int key=r.u16();std::vector<double>x;for(int j=0;j<width;++j)x.push_back(r.s16()*factor);if(i&&v.back().first>=key)fail("Unsorted animation track");v.push_back({key,x});}return v;};
-  struct Bone{std::vector<double> matrix,translate,rotate,roll;std::vector<std::pair<int,std::vector<double>>> tt,rr,rl;};
+  struct Bone{std::vector<double> matrix,translate,rotate,roll,scale;std::vector<std::pair<int,std::vector<double>>> tt,rr,rl,ss;};
   auto out=jarr();int total=0;
   for(int act=0;act<actions;++act){int last=r.u16();total+=(last+1)*nb*12;if(total>4000000)fail("Animation exceeds limits");std::vector<Bone>b(nb);
-    for(auto &x:b){int kind=r.u8();if(kind==0)x.matrix=r.matrix();else if(kind==1)x.matrix=ID();else if(kind>=2&&kind<=6){if(kind==2||kind==6)x.tt=track();if(kind==3)x.tt={{0,{double(r.s16()),double(r.s16()),double(r.s16())}}};x.rr=track();if(kind==3)x.rl={{0,{double(r.s16())*6.283185307179586/4096.0}}};else if(kind!=5)x.rl=track(1,6.283185307179586/4096.0);}else fail("Unsupported animation bone");}
+    for(auto &x:b){int kind=r.u8();if(kind==0)x.matrix=r.matrix();else if(kind==1)x.matrix=ID();else if(kind>=2&&kind<=6){if(kind==2||kind==6)x.tt=track();if(kind==3)x.tt={{0,{double(r.s16()),double(r.s16()),double(r.s16())}}};if(kind==2)x.ss=track(3,1.0/4096.0);x.rr=track();if(kind==3)x.rl={{0,{double(r.s16())*6.283185307179586/4096.0}}};else if(kind!=5)x.rl=track(1,6.283185307179586/4096.0);}else fail("Unsupported animation bone");}
     auto mats=jarr();for(int frame=0;frame<=last;++frame){auto all=jarr();for(auto &x:b){std::vector<double>m=x.matrix.empty()?ID():x.matrix;if(!x.tt.empty()){auto v=sample(x.tt,frame);m[3]=v[0];m[7]=v[1];m[11]=v[2];}if(!x.rr.empty()){auto v=sample(x.rr,frame);double xx=v[0],yy=v[1],zz=v[2];if(xx==0&&yy==0){if(zz<0)m[5]=m[10]=-1;}else{double len=std::sqrt(xx*xx+yy*yy+zz*zz);xx/=len;yy/=len;zz/=len;len=std::hypot(xx,yy);double rx=-yy/len,ry=xx/len;double s=std::sqrt(std::max(0.0,1-zz*zz)),nc=1-zz;m[0]=rx*rx*nc+zz;m[1]=rx*ry*nc;m[2]=ry*s;m[4]=rx*ry*nc;m[5]=ry*ry*nc+zz;m[6]=-rx*s;m[8]=-ry*s;m[9]=rx*s;m[10]=zz;}}
       if(!x.rl.empty()){double angle=sample(x.rl,frame)[0],c=std::cos(angle),s=std::sin(angle);for(int row:{0,4,8}){double a=m[row],bb=m[row+1];m[row]=a*c+bb*s;m[row+1]=bb*c-a*s;}}
+      if(!x.ss.empty()){auto v=sample(x.ss,frame);for(int row:{0,4,8})for(int col=0;col<3;++col)m[row+col]*=v[col];}
       for(double v:m)all->v.push_back(jd(v));
     }mats->v.push_back(ja(all));}auto ao=jobj();ao->v["last_frame"]=ji(last);ao->v["matrices"]=ja(mats);auto patterns=jobj();if(version==5){int n=r.u16();for(int i=0;i<n;++i){std::string k=std::to_string(r.u16());patterns->v[k]=ji(r.i32());}}ao->v["patterns"]=jo(patterns);out->v.push_back(jo(ao));
   }
@@ -709,6 +741,13 @@ static std::vector<std::vector<int64_t>> read_tables(const std::string&root,cons
   std::string raw=read_text(root+"/data/txt/"+name+".txt");for(char &c:raw)if(c=='\r'||c=='\n'||c=='\t')c=0;std::string clean;for(char c:raw)if(c)clean.push_back(c);
   auto rows=split(clean,';');std::vector<std::vector<int64_t>>out;
   for(auto &row:rows){if(row.empty())continue;auto cells=split(row,',');std::vector<int64_t>v;size_t start=station?1:0;for(size_t i=start;i<cells.size();++i)for(auto &s:split(cells[i],' ')){if(s.empty())continue;v.push_back(std::stoll(s));}out.push_back(std::move(v));}
+  return out;
+}
+
+static std::vector<std::string> station_names(const std::string&root){
+  std::string raw=read_text(root+"/data/txt/stations.txt");for(char &c:raw)if(c=='\r'||c=='\n'||c=='\t')c=0;
+  std::string clean;for(char c:raw)if(c)clean.push_back(c);
+  std::vector<std::string>out;for(auto &row:split(clean,';')){if(row.empty())continue;auto cells=split(row,',');if(!cells.empty())out.push_back(cells[0]);}
   return out;
 }
 
@@ -755,6 +794,7 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
   st[{"al","a","Lal;"}]=al;st[{"ap","b","I"}]=int64_t(1);
 
   std::map<int,std::string> textures;
+  std::vector<std::string> station_names_table=station_names(root);
   std::vector<ModelReg> models;
   std::shared_ptr<Obj> active;
   std::vector<int64_t> changes;
@@ -797,7 +837,7 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
         int kind=int(as_i(args[0])),reward=int(as_i(args[1])),dest=int(as_i(args[2]));
         if(obj){
           obj->f["a:I"]=int64_t(kind);obj->f["c:I"]=int64_t(reward);obj->f["e:I"]=int64_t(dest);
-          obj->f["b:Ljava/lang/String;"]=Val(std::string(""));
+          obj->f["b:Ljava/lang/String;"]=Val(dest>=0&&dest<int(station_names_table.size())?station_names_table[size_t(dest)]:"");
           obj->f["g:I"]=int64_t(-1);obj->f["h:I"]=int64_t(-1);obj->f["b:Z"]=true;obj->f["e:Z"]=true;
         }
         return {};
@@ -944,12 +984,21 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
   out->v["language"]=js(lang);out->v["constants"]=jo(constants);out->v["tables"]=table_json(root);
   out->v["campaign"]=ja(campaign);out->v["timelines"]=jo(timelines);out->v["strings"]=ja(strings);
   out->v["name_pools"]=ja(names);out->v["habitats"]=ja(habitats);out->v["data_reader"]=js("restricted-class-data-1");
-  out->v["station_geometry"]=jo(jobj());
+  auto station_geometry=jobj();
+  for(const auto &m:models){
+    if(m.id<3300||m.id>=3400)continue;
+    auto it=g_model_geometry.find(m.model);if(it==g_model_geometry.end()||it->second.size()!=6)continue;
+    auto g=jobj(),c=jarr(),e=jarr();
+    for(int i=0;i<3;++i)c->v.push_back(jd(it->second[i]));
+    for(int i=3;i<6;++i)e->v.push_back(jd(it->second[i]));
+    g->v["center"]=ja(c);g->v["extent"]=ja(e);station_geometry->v[std::to_string(m.id)]=jo(g);
+  }
+  out->v["station_geometry"]=jo(station_geometry);
   std::string s=json_string(jo(out));write_bin(root+"/native-data.json",std::vector<uint8_t>(s.begin(),s.end()));
 }
 
 static void extract_jar(const std::string&jar,const std::string&root){
-  ZipReader z(jar);std::string manifest;
+  g_model_geometry.clear();ZipReader z(jar);std::string manifest;
   try{auto m=z.read("META-INF/MANIFEST.MF");manifest=std::string(reinterpret_cast<const char*>(m.data()),m.size());}catch(...){fail("Unsupported JAR: not a readable MIDlet archive.");}
   for(size_t p=0;(p=manifest.find("\r\n",p))!=std::string::npos;){manifest.replace(p,2,"\n");}
   for(size_t p=0;(p=manifest.find("\n ",p))!=std::string::npos;)manifest.erase(p+0,1);
@@ -959,7 +1008,7 @@ static void extract_jar(const std::string&jar,const std::string&root){
   mkdir_recursive(root);
   auto names=z.names();size_t total=0;
   for(size_t i=0;i<names.size();++i){const std::string&n=names[i];auto it=z.entries.find(n);if(it==z.entries.end()||n=="META-INF/MANIFEST.MF"||n.empty()||n.back()=='/')continue;if(!safe_name(n))fail("Unsafe JAR entry");if(n.rfind("data/",0)!=0)continue;if(uint64_t(total)+it->second.size>128u*1024u*1024u)fail("JAR exceeds import limits");auto d=z.read(n);total+=d.size();std::string out=root+"/"+n;if(n!=icon){std::string ext=n.substr(n.find_last_of('.')+1);if(ext=="mbac"||ext=="mtra"||ext=="bmp"||ext=="png"){std::vector<uint8_t>u=d;int sz=int(u.size());int count=sz<100?10+sz%10:sz<200?50+sz%20:sz<300?80+sz%20:100+sz%50;if(sz<count)fail("Resource envelope is too short");for(int k=0;k<count;++k)std::swap(u[size_t(k)],u[size_t(sz-1-k)]);d.swap(u);}}write_bin(out,d);
-    if(n.size()>=5&&n.substr(n.size()-5)==".mbac"){auto m=micro_model(d);std::string s=json_string(jo(m.json));write_bin(out+".json",std::vector<uint8_t>(s.begin(),s.end()));}
+    if(n.size()>=5&&n.substr(n.size()-5)==".mbac"){auto m=micro_model(d);if(!m.geometry.empty())g_model_geometry[n]=m.geometry["__geometry"];std::string s=json_string(jo(m.json));write_bin(out+".json",std::vector<uint8_t>(s.begin(),s.end()));}
     else if(n.size()>=5&&n.substr(n.size()-5)==".mtra"){Json a=micro_animation(d);std::string s=json_string(a);write_bin(out+".json",std::vector<uint8_t>(s.begin(),s.end()));}
     else if(n.size()>=4&&n.substr(n.size()-4)==".bmp"){auto p=bmp_png(d,false),pa=bmp_png(d,true);write_bin(out+".png",p);write_bin(out+".alpha.png",pa);}
   }
