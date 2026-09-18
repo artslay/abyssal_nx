@@ -21,6 +21,29 @@
 #include "config.h"
 #include "libc_shim.h"
 #include "util.h"
+#include "jar_import.h"
+
+static int path_is_jar_file(const char *path) {
+  if (!path) return 0;
+  size_t n = strlen(path);
+  return n > 4 && strcasecmp(path + n - 4, ".jar") == 0;
+}
+
+static const char *resolve_jar_input(const char *path, char *out, size_t out_size) {
+  if (!path_is_jar_file(path)) return path;
+  if (!jar_import_prepare(path, config.save_root, out, (unsigned)out_size)) {
+#if DEBUG_LOG
+    debugPrintf("[jar] filesystem conversion failed for %s: %s
+", path, jar_import_error());
+#endif
+    return NULL;
+  }
+#if DEBUG_LOG
+  debugPrintf("[jar] filesystem remap %s -> %s
+", path, out);
+#endif
+  return out;
+}
 
 // fortify (_chk): ignore the object-size argument
 void *__memcpy_chk_fake(void *dst, const void *src, size_t n, size_t dstlen) {
@@ -400,6 +423,11 @@ int open_fake(const char *path, int flags, ...) {
     return URANDOM_FD;
   char sb[640];
   path = sandbox_path(path, sb, sizeof(sb));
+  char jarbuf[768];
+  if ((flags & O_ACCMODE) == O_RDONLY) {
+    path = resolve_jar_input(path, jarbuf, sizeof(jarbuf));
+    if (!path) return -1;
+  }
   char buf[640];
   const char *p = ((flags & O_ACCMODE) == O_RDONLY) ? obb_resolve(path, buf, sizeof(buf)) : path;
   int fd = open(p, oflags_bionic_to_newlib(flags), mode);
@@ -649,6 +677,11 @@ FILE *fopen_fake(const char *path, const char *mode) {
     return (FILE *)&urandom_marker;
   char sb[640];
   path = sandbox_path(path, sb, sizeof(sb));
+  char jarbuf[768];
+  if (strchr(mode, 'r')) {
+    path = resolve_jar_input(path, jarbuf, sizeof(jarbuf));
+    if (!path) return NULL;
+  }
   // read probes into a non-existent directory can't succeed -> skip the SD hit
   if (strchr(mode, 'r') && !dir_exists_cached(path)) {
     g_fopen_calls++; g_fopen_fail++; io_maybe_log();
