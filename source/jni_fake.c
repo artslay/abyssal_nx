@@ -434,12 +434,23 @@ static int gd_file_open(const char *path, int mode) {
   if (mode != GD_READ)
     ensure_parent_dirs(buf);
 
+  char opened[768];
+  const char *open_path = buf;
+  if (mode == GD_READ && path_is_jar(buf)) {
+    if (!jar_import_prepare(buf, config.save_root, opened, sizeof(opened))) {
+      debugPrintf("[jar] conversion failed for %s: %s\\n", buf, jar_import_error());
+      return -1;
+    }
+    open_path = opened;
+    debugPrintf("[jar] %s -> %s\\n", buf, open_path);
+  }
+
   FILE *f = NULL;
   int64_t known_size = -1;
-  const int poolable = (mode == GD_READ && path_is_pck(buf));
+  const int poolable = (mode == GD_READ && path_is_pck(open_path));
   if (poolable) {
     mutexLock(&gd_file_lock);
-    if (strcmp(pck_pool_path, buf) == 0) {
+    if (strcmp(pck_pool_path, open_path) == 0) {
       for (int i = 0; i < PCK_POOL_N; i++) {
         if (pck_pool[i]) {
           f = pck_pool[i];
@@ -457,7 +468,7 @@ static int gd_file_open(const char *path, int mode) {
   }
 
   if (!f) {
-    f = fopen(buf, m);
+    f = fopen(open_path, m);
 #if VERBOSE_IO
     debugPrintf("[jni] fileOpen(\"%s\" -> \"%s\", %d) = %p\n", path, buf, mode, (void *)f);
 #endif
