@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <switch.h>
 
 #include "patch.h"
 #include "so_util.h"
@@ -72,7 +73,48 @@ static int can_capture_pointer_safe(void *self) {
 // repl:      C replacement for a whole-function hook, or NULL for a word rewrite.
 typedef struct { uint32_t repl_word; uint32_t expect; uintptr_t vaddr; void *repl; const char *name; } GamePatch;
 
+// The Android build terminates by calling SceneTree::quit(), returning from the
+// frame, and only then entering Main::cleanup(). On Switch/NVK that cleanup can
+// block while worker threads are being torn down, so the normal forceQuit()
+// callback arrives too late. Catch the quit request at its source and terminate
+// the Switch process immediately, matching Android's force-quit behavior.
+static void switch_scene_tree_quit(int p_exit_code) {
+  debugPrintf("[patch] SceneTree::quit(%d) -> immediate Switch process exit\n", p_exit_code);
+  extern void NX_NORETURN __libnx_exit(int rc);
+  __libnx_exit(p_exit_code);
+}
+
+// Fallback for engine builds where SceneTree::quit() is not present in the
+// dynamic symbol table: SceneTree::quit() always sets OS::set_exit_code() first.
+static void switch_os_set_exit_code(int p_exit_code) {
+  debugPrintf("[patch] OS::set_exit_code(%d) -> immediate Switch process exit\n", p_exit_code);
+  extern void NX_NORETURN __libnx_exit(int rc);
+  __libnx_exit(p_exit_code);
+}
+
+
 void so_patch(so_module *mod) {
+  // Prefer SceneTree::quit(), because it is the actual user/game quit request.
+  // These are C++ symbols from Godot 4.x; the hook is installed before the
+  // module is finalized, while its backing image is still writable.
+  const uintptr_t quit_sym = so_try_find_addr_rx(mod, "_ZN9SceneTree4quitEi");
+  if (quit_sym) {
+    const uintptr_t quit_vaddr = quit_sym - (uintptr_t)mod->load_virtbase;
+    hook_arm64((uintptr_t)mod->load_base + quit_vaddr, (uintptr_t)&switch_scene_tree_quit);
+    debugPrintf("[patch] SceneTree::quit hooked at vaddr 0x%lx\n", (unsigned long)quit_vaddr);
+  } else {
+    // Older/stripped variants may omit SceneTree::quit from .dynsym. In that
+    // case OS::set_exit_code is the next earliest common exit signal.
+    const uintptr_t exit_sym = so_try_find_addr_rx(mod, "_ZN2OS13set_exit_codeEi");
+    if (exit_sym) {
+      const uintptr_t exit_vaddr = exit_sym - (uintptr_t)mod->load_virtbase;
+      hook_arm64((uintptr_t)mod->load_base + exit_vaddr, (uintptr_t)&switch_os_set_exit_code);
+      debugPrintf("[patch] OS::set_exit_code hooked at vaddr 0x%lx\n", (unsigned long)exit_vaddr);
+    } else {
+      debugPrintf("[patch] WARNING: no early quit symbol found; Exit will use normal cleanup\n");
+    }
+  }
+
   static const GamePatch patches[] = {
     { 0, CAN_CAPTURE_POINTER_WORD0, CAN_CAPTURE_POINTER_VADDR,
       (void *)&can_capture_pointer_safe, "can_capture_pointer" },
