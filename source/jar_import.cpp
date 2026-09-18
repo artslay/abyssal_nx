@@ -1,19 +1,4 @@
-/*
- * jar_import.cpp -- native, local JAR -> .abyss converter for the Switch port.
- *
- * This is a data-only port of the upstream Abyssal browser importer:
- *   browser/import_jar.py
- *   browser/micro3d.py
- *   tools/class_data.py
- *
- * The JAR is treated as untrusted data. No Java VM, constructors, methods or
- * class code are executed; the restricted bytecode evaluator only implements
- * the same data opcodes and summary callbacks used by the upstream importer.
- *
- * Audio codecs are deliberately not embedded here yet. .mid/.amr inputs are
- * omitted from the private pack, matching the existing runtime's procedural
- * sound fallback for missing effects. MIDI conversion can be added separately.
- */
+
 
 #include "jar_import.h"
 
@@ -134,10 +119,6 @@ static void remove_tree(const std::string &path) {
   rmdir(path.c_str());
 }
 
-/* ------------------------------------------------------------------------- */
-/* SHA-256                                                                   */
-/* ------------------------------------------------------------------------- */
-
 struct Sha256 {
   uint32_t h[8] = {
     0x6a09e667u,0xbb67ae85u,0x3c6ef372u,0xa54ff53au,
@@ -223,10 +204,6 @@ static std::string sha256_file(const std::string &path) {
   fclose(f);return s.finish_hex();
 }
 
-/* ------------------------------------------------------------------------- */
-/* JSON                                                                      */
-/* ------------------------------------------------------------------------- */
-
 struct JsonObj;
 struct JsonArr;
 using Json = std::variant<std::monostate,bool,int64_t,double,std::string,
@@ -274,10 +251,6 @@ static Json jd(double v){return v;}
 static Json js(const std::string &v){return v;}
 static Json jo(const std::shared_ptr<JsonObj> &v){return v;}
 static Json ja(const std::shared_ptr<JsonArr> &v){return v;}
-
-/* ------------------------------------------------------------------------- */
-/* ZIP reader/writer                                                          */
-/* ------------------------------------------------------------------------- */
 
 struct ZipEntry {
   std::string name;
@@ -363,10 +336,6 @@ static void write_zip_stored(const std::string &path, std::vector<PackItem> item
   wr32(f,0x06054b50u);wr16(f,0);wr16(f,0);wr16(f,uint16_t(items.size()));wr16(f,uint16_t(items.size()));wr32(f,cd_size);wr32(f,cd_offset);wr16(f,0);
   fclose(f);
 }
-
-/* ------------------------------------------------------------------------- */
-/* MUTF-8 and class reader                                                    */
-/* ------------------------------------------------------------------------- */
 
 static std::string mutf8(const std::vector<uint8_t> &raw) {
   std::vector<uint16_t> u;
@@ -462,10 +431,6 @@ struct ClassData {
     Rdr r(ai->second);r.u2();uint16_t locals=r.u2();uint32_t n=r.u4();return {r.take(n),locals};
   }
 };
-
-/* ------------------------------------------------------------------------- */
-/* Restricted evaluator                                                       */
-/* ------------------------------------------------------------------------- */
 
 struct Obj;struct Arr;
 using Val=std::variant<std::monostate,bool,int64_t,double,std::string,
@@ -612,7 +577,6 @@ struct Evaluator {
   }
 };
 
-
 static Json val_json(const Val &v) {
   if (std::holds_alternative<std::monostate>(v)) return Json(std::monostate{});
   if (auto p=std::get_if<bool>(&v)) return *p;
@@ -643,10 +607,6 @@ static Json record_json(const std::shared_ptr<Obj> &obj) {
   }
   return jo(out);
 }
-
-/* ------------------------------------------------------------------------- */
-/* Micro3D                                                                   */
-/* ------------------------------------------------------------------------- */
 
 struct Bits {
   const std::vector<uint8_t> &d;size_t p=0;uint32_t cache=0;int cached=0;
@@ -722,10 +682,6 @@ static Json micro_animation(const std::vector<uint8_t>&data){
   return ja(out);
 }
 
-/* ------------------------------------------------------------------------- */
-/* BMP -> PNG                                                                */
-/* ------------------------------------------------------------------------- */
-
 static std::vector<uint8_t> bmp_png(const std::vector<uint8_t>&d,bool alpha){
   if(d.size()<54||d[0]!='B'||d[1]!='M')fail("Invalid BMP");uint32_t offset=rd32(d.data()+10),header=rd32(d.data()+14);int32_t w=int32_t(rd32(d.data()+18)),h=int32_t(rd32(d.data()+22));uint16_t planes=rd16(d.data()+26),bits=rd16(d.data()+28);uint32_t comp=rd32(d.data()+30);
   if(header!=40||planes!=1||bits!=8||comp||w<=0||std::abs(h)>4096||w>4096)fail("Unsupported BMP encoding");uint32_t colors=rd32(d.data()+46);if(!colors)colors=256;if(colors<1||colors>256||offset<54+colors*4)fail("Invalid BMP palette");size_t stride=(size_t(w)+3)/4*4;if(uint64_t(offset)+uint64_t(std::abs(h))*stride>d.size())fail("Truncated BMP pixels");
@@ -735,10 +691,6 @@ static std::vector<uint8_t> bmp_png(const std::vector<uint8_t>&d,bool alpha){
   std::vector<uint8_t> out;auto chunk=[&](const char*kind,const std::vector<uint8_t>&p){std::string tmp;wrbe32(tmp,uint32_t(p.size()));tmp.append(kind,4);tmp.append(reinterpret_cast<const char*>(p.data()),p.size());uint32_t c=crc32(0,reinterpret_cast<const Bytef *>(tmp.data()+4),tmp.size()-4);wrbe32(tmp,c);out.insert(out.end(),tmp.begin(),tmp.end());};
   static const uint8_t sig[]={0x89,'P','N','G',0x0d,0x0a,0x1a,0x0a};out.insert(out.end(),sig,sig+8);std::vector<uint8_t>ihdr={uint8_t(w>>24),uint8_t(w>>16),uint8_t(w>>8),uint8_t(w),uint8_t(std::abs(h)>>24),uint8_t(std::abs(h)>>16),uint8_t(std::abs(h)>>8),uint8_t(std::abs(h)),8,6,0,0,0};chunk("IHDR",ihdr);chunk("IDAT",z);chunk("IEND",{});return out;
 }
-
-/* ------------------------------------------------------------------------- */
-/* File extraction / profile                                                 */
-/* ------------------------------------------------------------------------- */
 
 static bool safe_name(const std::string &n){
   if(n.empty()||n[0]=='/'||n.find('\\')!=std::string::npos||n.find(':')!=std::string::npos)return false;
@@ -775,7 +727,6 @@ static Json read_lang_file(const std::string&path){
   auto d=read_all(path);Rdr r(d);auto arr=jarr();while(r.p<d.size()){uint16_t n=r.u2();auto x=r.take(n);arr->v.push_back(js(mutf8(x)));}return ja(arr);
 }
 
-/* The game-specific profile is intentionally close to extract_data.py. */
 static void build_profile(const std::string&jar,const std::string&root,const ZipReader&zip){
   static const char* classes_req[]={"ah","e","bo","ab","f","dj","cy"};
   std::map<std::string,ClassData> classes;
@@ -997,10 +948,6 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
   std::string s=json_string(jo(out));write_bin(root+"/native-data.json",std::vector<uint8_t>(s.begin(),s.end()));
 }
 
-/* ------------------------------------------------------------------------- */
-/* End-to-end conversion                                                     */
-/* ------------------------------------------------------------------------- */
-
 static void extract_jar(const std::string&jar,const std::string&root){
   ZipReader z(jar);std::string manifest;
   try{auto m=z.read("META-INF/MANIFEST.MF");manifest=std::string(reinterpret_cast<const char*>(m.data()),m.size());}catch(...){fail("Unsupported JAR: not a readable MIDlet archive.");}
@@ -1011,7 +958,7 @@ static void extract_jar(const std::string&jar,const std::string&root){
   std::string icon=mid[1];if(!icon.empty()&&icon[0]=='/')icon.erase(icon.begin());
   mkdir_recursive(root);
   auto names=z.names();size_t total=0;
-  for(size_t i=0;i<names.size();++i){const std::string&n=names[i];auto it=z.entries.find(n);if(it==z.entries.end()||n=="META-INF/MANIFEST.MF"||n.empty()||n.back()=='/')continue;if(!safe_name(n))fail("Unsafe JAR entry");if(n.rfind("data/",0)!=0)continue;if(uint64_t(total)+it->second.size>128u*1024u*1024u)fail("JAR exceeds import limits");auto d=z.read(n);total+=d.size();std::string out=root+"/"+n;if(n!=icon){std::string ext=n.substr(n.find_last_of('.')+1);if(ext=="mbac"||ext=="mtra"||ext=="bmp"||ext=="png"){std::vector<uint8_t>u=d;/* resource envelope */int sz=int(u.size());int count=sz<100?10+sz%10:sz<200?50+sz%20:sz<300?80+sz%20:100+sz%50;if(sz<count)fail("Resource envelope is too short");for(int k=0;k<count;++k)std::swap(u[size_t(k)],u[size_t(sz-1-k)]);d.swap(u);}}write_bin(out,d);
+  for(size_t i=0;i<names.size();++i){const std::string&n=names[i];auto it=z.entries.find(n);if(it==z.entries.end()||n=="META-INF/MANIFEST.MF"||n.empty()||n.back()=='/')continue;if(!safe_name(n))fail("Unsafe JAR entry");if(n.rfind("data/",0)!=0)continue;if(uint64_t(total)+it->second.size>128u*1024u*1024u)fail("JAR exceeds import limits");auto d=z.read(n);total+=d.size();std::string out=root+"/"+n;if(n!=icon){std::string ext=n.substr(n.find_last_of('.')+1);if(ext=="mbac"||ext=="mtra"||ext=="bmp"||ext=="png"){std::vector<uint8_t>u=d;int sz=int(u.size());int count=sz<100?10+sz%10:sz<200?50+sz%20:sz<300?80+sz%20:100+sz%50;if(sz<count)fail("Resource envelope is too short");for(int k=0;k<count;++k)std::swap(u[size_t(k)],u[size_t(sz-1-k)]);d.swap(u);}}write_bin(out,d);
     if(n.size()>=5&&n.substr(n.size()-5)==".mbac"){auto m=micro_model(d);std::string s=json_string(jo(m.json));write_bin(out+".json",std::vector<uint8_t>(s.begin(),s.end()));}
     else if(n.size()>=5&&n.substr(n.size()-5)==".mtra"){Json a=micro_animation(d);std::string s=json_string(a);write_bin(out+".json",std::vector<uint8_t>(s.begin(),s.end()));}
     else if(n.size()>=4&&n.substr(n.size()-4)==".bmp"){auto p=bmp_png(d,false),pa=bmp_png(d,true);write_bin(out+".png",p);write_bin(out+".alpha.png",pa);}
@@ -1040,7 +987,7 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
   }catch(const std::exception&e){g_error=e.what();debugPrintf("[jar] %s\n",g_error.c_str());return 0;}
 }
 
-} // namespace
+} 
 
 extern "C" int jar_import_prepare(const char*jar_path,const char*cache_root,char*out_path,unsigned out_size){
   return prepare(jar_path,cache_root,out_path,out_size);
