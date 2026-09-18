@@ -582,10 +582,10 @@ struct ClassData {
           validate_index(q.second,"MethodHandle.reference_index");
           int t=pool[q.second].tag;
           bool ok=false;
-          if(q.first==1)ok=(t==9);
-          else if(q.first>=2&&q.first<=4)ok=(t==10);
-          else if(q.first==5||q.first==8)ok=(t==10||t==11);
+          if(q.first>=1&&q.first<=4)ok=(t==9);
+          else if(q.first==5)ok=(t==10);
           else if(q.first==6||q.first==7)ok=(t==10||t==11);
+          else if(q.first==8)ok=(t==10);
           else if(q.first==9)ok=(t==11);
           if(!ok)fail("Invalid MethodHandle target #"+std::to_string(q.second)+" in "+name);
           break;
