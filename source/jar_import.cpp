@@ -1079,6 +1079,7 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
   }
   out->v["station_geometry"]=jo(station_geometry);
   std::string s=json_string(jo(out));write_bin(root+"/native-data.json",std::vector<uint8_t>(s.begin(),s.end()));
+  debugPrintf("[jar] profile: models=%zu chapters=%d strings=%zu language=%s\\n", models.size(), chapters, strings->v.size(), lang.c_str());
 }
 
 static void extract_jar(const std::string&jar,const std::string&root){
@@ -1103,6 +1104,39 @@ static void collect_files(const std::string&dir,const std::string&rel,std::vecto
   DIR*d=opendir(dir.c_str());if(!d)return;struct dirent*e;while((e=readdir(d))){if(e->d_name[0]=='.')continue;std::string full=dir+"/"+e->d_name,r=rel.empty()?e->d_name:rel+"/"+e->d_name;struct stat st{};if(stat(full.c_str(),&st))continue;if(S_ISDIR(st.st_mode))collect_files(full,r,out);else out.push_back(r);}closedir(d);
 }
 
+static void validate_generated_pack(const std::string &pack,const std::string &root){
+  auto raw=read_all(pack,128u*1024u*1024u);
+  if(raw.size()<22)fail("Generated content pack is too small");
+  size_t end=raw.size()-22;
+  if(rd32(raw.data()+end)!=0x06054b50u)fail("Generated content pack has no ZIP end record");
+  if(rd16(raw.data()+end+4)!=0||rd16(raw.data()+end+6)!=0||rd16(raw.data()+end+20)!=0)fail("Generated content pack uses unsupported ZIP features");
+  uint16_t count=rd16(raw.data()+end+10);
+  uint32_t cdsize=rd32(raw.data()+end+12),cd=rd32(raw.data()+end+16);
+  if(count<4||count>4096||rd16(raw.data()+end+8)!=count)fail("Generated content pack has an invalid entry count");
+  if(uint64_t(cd)+cdsize!=end||uint64_t(cd)+cdsize>raw.size())fail("Generated content pack central directory is invalid");
+  size_t p=cd;bool have_pack=false,have_native=false,have_registry=false,have_bindings=false;
+  for(uint16_t i=0;i<count;++i){
+    if(p+46>end||rd32(raw.data()+p)!=0x02014b50u)fail("Generated content pack central directory entry is invalid");
+    uint16_t flags=rd16(raw.data()+p+8),method=rd16(raw.data()+p+10);
+    uint32_t expanded=rd32(raw.data()+p+24);
+    uint16_t nl=rd16(raw.data()+p+28),el=rd16(raw.data()+p+30),cl=rd16(raw.data()+p+32);
+    if(flags&1||method!=0||expanded>32u*1024u*1024u||p+46+nl+el+cl>end)fail("Generated content pack has an unsupported entry");
+    std::string name(reinterpret_cast<const char*>(raw.data()+p+46),nl);
+    if(!safe_name(name))fail("Generated content pack contains an unsafe entry");
+    if(name=="pack.json")have_pack=true;else if(name=="native-data.json")have_native=true;else if(name=="resource_registry.json")have_registry=true;else if(name=="bindings.json")have_bindings=true;
+    p+=46+nl+el+cl;
+  }
+  if(p!=end||!have_pack||!have_native||!have_registry||!have_bindings)fail("Generated content pack is missing required files");
+  auto native=read_text(root+"/native-data.json");
+  auto registry=read_text(root+"/resource_registry.json");
+  auto bindings=read_text(root+"/bindings.json");
+  if(native.find("\\"schema\\":1")==std::string::npos||native.find("\\"jar_sha256\\":\\""+jar_sha+"\\"")==std::string::npos||native.find("\\"importer\\":\\"native-6\\"")==std::string::npos)fail("Generated native-data.json is incomplete");
+  if(native.find("\\"campaign\\":[")==std::string::npos||native.find("\\"strings\\":[")==std::string::npos)fail("Generated native-data.json has no campaign/string data");
+  if(registry.size()<3||registry.find_first_not_of(" \\t\\r\\n")!=0||registry.find("[ ]")!=std::string::npos||registry=="[]")fail("Generated resource registry is empty");
+  if(bindings.size()<3||bindings=="{}")fail("Generated resource bindings are empty");
+  debugPrintf("[jar] generated pack validated: entries=%u size=%zu registry=%zu\\n",(unsigned)count,raw.size(),registry.size());
+}
+
 static void build_pack(const std::string&root,const std::string&jar_sha,const std::string&pack){
   std::vector<std::string> names={"native-data.json","resource_registry.json","bindings.json"};std::vector<std::string>all;collect_files(root+"/data","data",all);names.insert(names.end(),all.begin(),all.end());
   std::vector<PackItem> items;auto man=jobj();man->v["format"]=js("abyssal-content-1");man->v["profile"]=js(jar_sha);auto files=jobj();
@@ -1114,8 +1148,8 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
   if(!jar_path||!cache_root||!out||!out_size){g_error="Invalid importer arguments";return 0;}
   try{
     long size=0;FILE*f=fopen(jar_path,"rb");if(!f)fail("Cannot open JAR");fseek(f,0,SEEK_END);size=ftell(f);fclose(f);if(size<0||size>16*1024*1024)fail("JAR exceeds 16 MiB.");
-    std::string digest=sha256_file(jar_path);std::string base=std::string(cache_root)+"/_jar_import_v2";std::string pack=base+"/"+digest+".abyss";
-    if(!file_exists(pack)){std::string work=base+"/"+digest+".work";remove_tree(work);mkdir_recursive(work);extract_jar(jar_path,work);build_pack(work,digest,pack);remove_tree(work);}
+    std::string digest=sha256_file(jar_path);std::string base=std::string(cache_root)+"/_jar_import_v3";std::string pack=base+"/"+digest+".abyss";
+    if(!file_exists(pack)){std::string work=base+"/"+digest+".work";remove_tree(work);mkdir_recursive(work);extract_jar(jar_path,work);build_pack(work,digest,pack);validate_generated_pack(pack,work);remove_tree(work);}
     if(!file_exists(pack))fail("Native JAR converter did not create a content pack");
     if(pack.size()+1>out_size)fail("Converted pack path is too long");
     snprintf(out,out_size,"%s",pack.c_str());
