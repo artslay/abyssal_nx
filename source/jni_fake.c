@@ -495,7 +495,7 @@ static int gd_file_open(const char *path, int mode) {
     pck_pool_path,
     sizeof(pck_pool_path),
     "%s",
-    buf
+    open_path
 );
         }
       }
