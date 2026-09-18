@@ -34,14 +34,12 @@ static const char *resolve_jar_input(const char *path, char *out, size_t out_siz
   if (!path_is_jar_file(path)) return path;
   if (!jar_import_prepare(path, config.save_root, out, (unsigned)out_size)) {
 #if DEBUG_LOG
-    debugPrintf("[jar] filesystem conversion failed for %s: %s
-", path, jar_import_error());
+    debugPrintf("[jar] filesystem conversion failed for %s: %s\n", path, jar_import_error());
 #endif
     return NULL;
   }
 #if DEBUG_LOG
-  debugPrintf("[jar] filesystem remap %s -> %s
-", path, out);
+  debugPrintf("[jar] filesystem remap %s -> %s\n", path, out);
 #endif
   return out;
 }
