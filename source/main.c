@@ -1296,7 +1296,9 @@ int main(void) {
     debugPrintf("== Exit requested by game; terminating process immediately ==\n");
     s_game_running = 0;
     s_ithread_run = 0;
+    extern u32 __nx_applet_exit_mode;
     extern void NX_NORETURN __libnx_exit(int rc);
+    __nx_applet_exit_mode = 1;
     __libnx_exit(0);
   }
 
