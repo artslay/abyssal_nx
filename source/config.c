@@ -50,7 +50,6 @@ int read_config(const char *file) {
   config.deadzone = 18; // percent; config.txt "deadzone 0" turns it off
   config.assetpack = 1; // pack loose assets on first boot for faster SD loading
   config.enable_vulkan = 1; // use the Vulkan renderer (NVK) when the driver comes up
-  config.touch_controls = 0; // disable Android on-screen controls by default
 
   FILE *f = fopen(file, "r");
   if (f == NULL)
