@@ -57,8 +57,6 @@ Copy the complete `assets/` folder to:
 ```text
 /switch/abyssal_nx/assets/
 ```
-The original game libraries and game data are not included in this repository.
-
 ## JAR import
 
 The Switch port can accept an original DEEP JAR directly from the Import Content file picker.
