@@ -133,7 +133,7 @@ The configuration file is:
 /switch/abyssal_nx/config.txt
 ```
 
-The configuration can be used to adjust the screen resolution, analog deadzone, asset packing, Vulkan rendering and touch controls.
+The configuration can be used to adjust the screen resolution, analog deadzone, asset packing and Vulkan rendering.
 
 Example:
 
@@ -143,7 +143,6 @@ screen_height 720
 deadzone 18
 assetpack 1
 enable_vulkan 1
-touch_controls 0
 ```
 
 ## Resolution
