@@ -1009,6 +1009,8 @@ static std::string read_text(const std::string &path){auto d=read_all(path);retu
 
 struct ModelReg {int id;std::string model,texture;int texture_id=-1;};
 
+static std::string trim(const std::string &s){size_t a=0,b=s.size();while(a<b&&(s[a]==' '||s[a]=='\t'||s[a]=='\r'||s[a]=='\n'))++a;while(b>a&&(s[b-1]==' '||s[b-1]=='\t'||s[b-1]=='\r'||s[b-1]=='\n'))--b;return s.substr(a,b-a);}
+
 static std::vector<std::string> split(const std::string&s,char c){std::vector<std::string>o;size_t p=0;while(true){size_t q=s.find(c,p);o.push_back(s.substr(p,q==std::string::npos?s.size()-p:q-p));if(q==std::string::npos)break;p=q+1;}return o;}
 
 static std::vector<std::vector<int64_t>> read_tables(const std::string&root,const std::string&name,bool station){
@@ -1293,7 +1295,7 @@ static void extract_jar(const std::string&jar,const std::string&root){
   for(size_t p=0;(p=manifest.find("\r\n",p))!=std::string::npos;){manifest.replace(p,2,"\n");}
   for(size_t p=0;(p=manifest.find("\n ",p))!=std::string::npos;)manifest.erase(p+0,1);
   std::map<std::string,std::string>fields;for(auto&line:split(manifest,'\n')){size_t q=line.find(": ");if(q!=std::string::npos)fields[line.substr(0,q)]=line.substr(q+2);}
-  auto mid=split(fields["MIDlet-1"],',');if(mid.size()!=3||mid[2]!="DeepMIDlet")fail("Unsupported JAR: this is not a DEEP MIDlet.");
+  auto mid=split(fields["MIDlet-1"],',');for(auto &part:mid)part=trim(part);if(mid.size()!=3||mid[2]!="DeepMIDlet")fail("Unsupported JAR: this is not a DEEP MIDlet.");
   std::string icon=mid[1];if(!icon.empty()&&icon[0]=='/')icon.erase(icon.begin());
   mkdir_recursive(root);
   auto names=z.names();size_t total=0;
