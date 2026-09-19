@@ -29,7 +29,7 @@ The Android libraries and game data must be obtained from the original Android v
 
 ## Obtaining the game files
 
-The original Android APK can be obtained from the [ABYSSAL repository](https://github.com/TheWWWorm/abyssal).
+The original Android APK can be obtained from the [abyssal repository](https://github.com/TheWWWorm/abyssal).
 
 Open the APK with an archive utility such as 7-Zip or WinRAR.
 
@@ -52,22 +52,12 @@ to:
 /switch/abyssal_nx/
 ```
 
-The game engine assets are contained in the Android APK `assets/` directory.
-
 Copy the complete `assets/` folder to:
 
 ```text
 /switch/abyssal_nx/assets/
 ```
-
-The following file is required:
-
-```text
-/switch/abyssal_nx/assets/project.binary
-```
-
 The original game libraries and game data are not included in this repository.
-
 
 ## JAR import
 
