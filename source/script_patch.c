@@ -978,30 +978,9 @@ void script_patches_apply(void) {
       &k_scripts[i];
 
     /*
-     * touch_controls=1 means leave the original Android touch scripts alone.
-     * Remove old generated overrides so changing the config takes effect.
+     * Touch controls are configured by the original game in its Controls menu
+     * (Auto / On / Off). The Switch wrapper does not override that setting.
      */
-    if (config.touch_controls) {
-
-      char stale[512];
-
-      snprintf(
-        stale,
-        sizeof(stale),
-        "%s/_ovr/%s",
-        config.save_root,
-        script->name
-      );
-
-      remove(stale);
-
-      debugPrintf(
-        "[script] %s left original (touch_controls=1)\n",
-        script->asset
-      );
-
-      continue;
-    }
 
     char path[512];
 
