@@ -13,7 +13,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET		:=	abyssal_nx
 APP_TITLE	:=	Deep 3D
 APP_AUTHOR	:=	artslay
-APP_VERSION	:=	1.0.0
+APP_VERSION	:=	1.0.2
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
