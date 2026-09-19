@@ -22,7 +22,6 @@
   CONFIG_VAR_INT(deadzone); \
   CONFIG_VAR_INT(assetpack); \
   CONFIG_VAR_INT(enable_vulkan); \
-  CONFIG_VAR_INT(touch_controls); \
   CONFIG_VAR_STR(rendering_method);
 
 Config config;
