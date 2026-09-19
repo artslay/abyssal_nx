@@ -55,7 +55,7 @@ to:
 Copy the complete `assets/` folder to:
 
 ```text
-/switch/abyssal_nx/assets/
+/switch/abyssal_nx/
 ```
 ## JAR import
 
