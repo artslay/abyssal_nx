@@ -166,37 +166,35 @@ screen_height 1080
 
 Lower resolutions can be used to reduce rendering load.
 
-## Build
+## How to build
 
-### Requirements
+You need:
 
-Install the devkitPro Nintendo Switch toolchain, including:
-
+* devkitPro
 * devkitA64
 * libnx
-* required Switch portlibs
+* GNU Make
+* Mesa Switch port
 
-### Mesa
-
-This project does **not** include `mesa-sdk`.
-
-Mesa must be built separately from this repository:
+Mesa for Nintendo Switch:
 
 https://github.com/NaGaa95/mesa-switch
 
-Build/install the required Mesa Switch libraries before building `abyssal_nx`.
+Build the required Mesa Switch libraries according to the instructions in the repository.
 
-The resulting Mesa libraries must be available to the `abyssal_nx` build according to the paths expected by the Makefile.
+Additional dependencies:
 
-### Build abyssal_nx
+```bash
+dkp-pacman -S switch-zlib switch-libexpat
+```
 
-Clone the repository and build it with:
+Then build:
 
 ```bash
 make
 ```
 
-For a clean rebuild:
+For a clean build:
 
 ```bash
 make clean
@@ -206,9 +204,9 @@ make
 The build produces:
 
 ```text
-abyssal_nx.nro
-abyssal_nx.nacp
-abyssal_nx.elf
+galaxian_nx.nro
+galaxian_nx.nacp
+galaxian_nx.elf
 ```
 
 ## Project structure
