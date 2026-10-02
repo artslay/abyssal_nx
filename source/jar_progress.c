@@ -153,7 +153,7 @@ static void overlay_close_partial(void) {
     if (g_layer_open) {
         Result rc = serviceDispatchIn(&g_vi_app, 2031, g_layer_id);
         if (R_FAILED(rc))
-            debugPrintf("[jar-ui] close layer failed: 0x%x\\n", rc);
+            debugPrintf("[jar-ui] close layer failed: 0x%x\n", rc);
         g_layer_open = 0;
         g_layer_id = 0;
     }
@@ -161,7 +161,7 @@ static void overlay_close_partial(void) {
     if (g_display_open) {
         Result rc = serviceDispatchIn(&g_vi_app, 1020, g_display_id);
         if (R_FAILED(rc))
-            debugPrintf("[jar-ui] close display failed: 0x%x\\n", rc);
+            debugPrintf("[jar-ui] close display failed: 0x%x\n", rc);
         g_display_open = 0;
         g_display_id = 0;
     }
@@ -191,7 +191,7 @@ static int overlay_init(void) {
          */
         Result rc = smGetService(&g_vi_root, "vi:u");
         if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] smGetService(vi:u) failed: 0x%x\\n", rc);
+            debugPrintf("[jar-ui] smGetService(vi:u) failed: 0x%x\n", rc);
             return 0;
         }
 
@@ -199,7 +199,7 @@ static int overlay_init(void) {
                                .out_num_objects = 1,
                                .out_objects = &g_vi_app);
         if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] vi:u application session failed: 0x%x\\n", rc);
+            debugPrintf("[jar-ui] vi:u application session failed: 0x%x\n", rc);
             overlay_close_partial();
             return 0;
         }
@@ -208,7 +208,7 @@ static int overlay_init(void) {
                              .out_num_objects = 1,
                              .out_objects = &g_vi_relay);
         if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] vi:u binder relay failed: 0x%x\\n", rc);
+            debugPrintf("[jar-ui] vi:u binder relay failed: 0x%x\n", rc);
             overlay_close_partial();
             return 0;
         }
@@ -221,11 +221,11 @@ static int overlay_init(void) {
         u64 display_id;
     } display_out = {0};
 
-    rc = serviceDispatchInOut(&g_vi_app, 1010,
-                              (ViDisplayName){{"Default"}},
-                              display_out);
+    ViDisplayName display_name = {};
+    strncpy(display_name.data, "Default", sizeof(display_name.data) - 1);
+    rc = serviceDispatchInOut(&g_vi_app, 1010, display_name, display_out);
     if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] vi:u OpenDisplay(Default) failed: 0x%x\\n", rc);
+        debugPrintf("[jar-ui] vi:u OpenDisplay(Default) failed: 0x%x\n", rc);
         overlay_close_partial();
         return 0;
     }
@@ -257,14 +257,14 @@ static int overlay_init(void) {
                               } },
                               .buffers = { { native_window_raw, sizeof(native_window_raw) } });
     if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] vi:u CreateStrayLayer failed: 0x%x\\n", rc);
+        debugPrintf("[jar-ui] vi:u CreateStrayLayer failed: 0x%x\n", rc);
         overlay_close_partial();
         return 0;
     }
 
     if (layer_out.native_window_size > sizeof(native_window_raw) ||
         layer_out.native_window_size < sizeof(ParcelHeader)) {
-        debugPrintf("[jar-ui] vi:u layer parcel size invalid: 0x%llx\\n",
+        debugPrintf("[jar-ui] vi:u layer parcel size invalid: 0x%llx\n",
                     (unsigned long long)layer_out.native_window_size);
         overlay_close_partial();
         return 0;
@@ -274,7 +274,7 @@ static int overlay_init(void) {
     if (hdr->payload_off > layer_out.native_window_size ||
         hdr->payload_size > layer_out.native_window_size - hdr->payload_off ||
         hdr->payload_size < 3 * sizeof(u32)) {
-        debugPrintf("[jar-ui] vi:u layer parcel invalid off=0x%x size=0x%x total=0x%llx\\n",
+        debugPrintf("[jar-ui] vi:u layer parcel invalid off=0x%x size=0x%x total=0x%llx\n",
                     hdr->payload_off, hdr->payload_size,
                     (unsigned long long)layer_out.native_window_size);
         overlay_close_partial();
@@ -284,7 +284,7 @@ static int overlay_init(void) {
     u32 *payload = (u32 *)&native_window_raw[hdr->payload_off];
     const u32 binder_id = payload[2];
     if (!binder_id) {
-        debugPrintf("[jar-ui] vi:u layer returned empty IGBP binder id\\n");
+        debugPrintf("[jar-ui] vi:u layer returned empty IGBP binder id\n");
         overlay_close_partial();
         return 0;
     }
@@ -299,36 +299,36 @@ static int overlay_init(void) {
                                u64 layer_id;
                            }){ ViScalingMode_FitToLayer, 0, g_layer_id }));
     if (R_FAILED(rc))
-        debugPrintf("[jar-ui] vi:u SetLayerScalingMode failed: 0x%x\\n", rc);
+        debugPrintf("[jar-ui] vi:u SetLayerScalingMode failed: 0x%x\n", rc);
 
     rc = nwindowCreate(&g_window, &g_vi_relay, (s32)binder_id, false);
     if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] nwindowCreate overlay failed: 0x%x\\n", rc);
+        debugPrintf("[jar-ui] nwindowCreate overlay failed: 0x%x\n", rc);
         overlay_close_partial();
         return 0;
     }
 
     rc = nwindowSetDimensions(&g_window, OVERLAY_W, OVERLAY_H);
     if (R_FAILED(rc))
-        debugPrintf("[jar-ui] nwindowSetDimensions overlay failed: 0x%x\\n", rc);
+        debugPrintf("[jar-ui] nwindowSetDimensions overlay failed: 0x%x\n", rc);
 
     rc = framebufferCreate(&g_fb, &g_window, OVERLAY_W, OVERLAY_H,
                            PIXEL_FORMAT_RGBA_8888, 1);
     if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] framebufferCreate failed: 0x%x\\n", rc);
+        debugPrintf("[jar-ui] framebufferCreate failed: 0x%x\n", rc);
         overlay_close_partial();
         return 0;
     }
 
     rc = framebufferMakeLinear(&g_fb);
     if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] framebufferMakeLinear failed: 0x%x\\n", rc);
+        debugPrintf("[jar-ui] framebufferMakeLinear failed: 0x%x\n", rc);
         overlay_close_partial();
         return 0;
     }
 
     g_ready = 1;
-    debugPrintf("[jar-ui] progress layer ready (vi:u layer=%llu)\\n",
+    debugPrintf("[jar-ui] progress layer ready (vi:u layer=%llu)\n",
                 (unsigned long long)g_layer_id);
     return 1;
 }
