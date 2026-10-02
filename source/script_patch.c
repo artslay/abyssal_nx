@@ -122,8 +122,8 @@ static const ConstPatch k_save_load[] = {
  * so we disable the native dialog and leave the file list unfiltered.
  */
 static const ConstPatch k_file_access_const[] = {
-  { "*.abyss ; Private Abyssal content pack ; application/octet-stream,application/zip",
-    "*                                                                                ",
+  { "*.abyss ; ",
+    "*       ; ",
     0.0, 0.0, 1 },
 };
 
