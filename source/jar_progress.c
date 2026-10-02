@@ -18,7 +18,9 @@ extern void debugPrintf(const char *fmt, ...);
  * layer is rejected by VI, so the importer uses a separate VI application
  * session and creates a stray layer on the Default display.
  */
+static Service g_vi_app;
 static Service g_vi_relay;
+static ViDisplay g_display;
 static ViLayer g_layer;
 static NWindow g_window;
 static Framebuffer g_fb;
@@ -146,9 +148,8 @@ static void overlay_close_partial(void) {
     }
 
     if (g_layer_open) {
-        Service *vi_app = viGetSession_IApplicationDisplayService();
-        if (serviceIsActive(vi_app)) {
-            Result rc = serviceDispatchIn(vi_app, 2031, g_layer.layer_id);
+        if (serviceIsActive(&g_vi_app)) {
+            Result rc = serviceDispatchIn(&g_vi_app, 2031, g_layer.layer_id);
             if (R_FAILED(rc))
                 debugPrintf("[jar-ui] close stray layer failed: 0x%x\n", rc);
         }
@@ -156,9 +157,20 @@ static void overlay_close_partial(void) {
         g_layer_open = 0;
     }
 
+    if (g_display.initialized) {
+        Result rc = serviceDispatchIn(&g_vi_app, 1020, g_display.display_id);
+        if (R_FAILED(rc))
+            debugPrintf("[jar-ui] close display failed: 0x%x\n", rc);
+        memset(&g_display, 0, sizeof(g_display));
+    }
+
     if (serviceIsActive(&g_vi_relay))
         serviceClose(&g_vi_relay);
+    if (serviceIsActive(&g_vi_app))
+        serviceClose(&g_vi_app);
+
     memset(&g_vi_relay, 0, sizeof(g_vi_relay));
+    memset(&g_vi_app, 0, sizeof(g_vi_app));
     g_vi_open = 0;
 }
 
@@ -166,72 +178,78 @@ static int overlay_init(void) {
     if (g_ready) return 1;
 
     /*
-     * libnx has already initialized VI and owns the application's normal
-     * managed layer through nwindowGetDefault(). Reopening Default with
-     * OpenDisplay(1010) or asking AM for another managed layer both return
-     * VI 0x272. Reuse the existing service sessions and create a stray layer.
+     * libnx has already initialized its primary VI session and opened the
+     * Default display for nwindowGetDefault() before main(). Instead of
+     * reopening that same IApplicationDisplayService object, clone it.
      *
-     * libnx's own _viCreateStrayLayer() uses:
-     *   HOS >= 7:  IManagerDisplayService command 2012
-     *   older:    ISystemDisplayService command 2312
-     *   legacy:   IApplicationDisplayService command 2030
-     *
-     * The "Default" display id is 0, so no second OpenDisplay is necessary.
+     * The cloned session has the same service privileges but its own server
+     * session state. We can therefore OpenDisplay("Default") to obtain the
+     * real DisplayId, then CreateStrayLayer on that exact DisplayId.
      */
-    Service *vi_mgr = viGetSession_IManagerDisplayService();
-    Service *vi_sys = viGetSession_ISystemDisplayService();
-    Service *vi_app = viGetSession_IApplicationDisplayService();
-    Service *vi_relay = viGetSession_IHOSBinderDriverRelay();
-
-    Service *create_srv = NULL;
-    u32 create_cmd = 0;
-    if (serviceIsActive(vi_mgr)) {
-        create_srv = vi_mgr;
-        create_cmd = 2012;
-    } else if (serviceIsActive(vi_sys)) {
-        create_srv = vi_sys;
-        create_cmd = 2312;
-    } else if (serviceIsActive(vi_app)) {
-        create_srv = vi_app;
-        create_cmd = 2030;
-    }
-
-    if (!create_srv || !serviceIsActive(vi_relay)) {
-        debugPrintf("[jar-ui] no usable existing VI sessions\n");
+    Service *global_app = viGetSession_IApplicationDisplayService();
+    Service *global_relay = viGetSession_IHOSBinderDriverRelay();
+    if (!serviceIsActive(global_app) || !serviceIsActive(global_relay)) {
+        debugPrintf("[jar-ui] global VI sessions are not active\n");
         return 0;
     }
 
     if (!g_vi_open) {
-        Result rc = serviceClone(vi_relay, &g_vi_relay);
+        Result rc = serviceClone(global_app, &g_vi_app);
         if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] clone VI binder relay failed: 0x%x\n", rc);
+            debugPrintf("[jar-ui] clone VI application session failed: 0x%x\n", rc);
             return 0;
         }
+
+        rc = serviceClone(global_relay, &g_vi_relay);
+        if (R_FAILED(rc)) {
+            debugPrintf("[jar-ui] clone VI binder relay failed: 0x%x\n", rc);
+            serviceClose(&g_vi_app);
+            memset(&g_vi_app, 0, sizeof(g_vi_app));
+            return 0;
+        }
+
         g_vi_open = 1;
     }
 
+    /*
+     * Open the display on the cloned IApplicationDisplayService. This is
+     * required before CreateStrayLayer because HOS validates the DisplayId
+     * against the displays opened by this service session.
+     */
+    Result rc = viOpenDisplay("Default", &g_display);
+    if (R_FAILED(rc)) {
+        debugPrintf("[jar-ui] clone VI OpenDisplay(Default) failed: 0x%x\n", rc);
+        overlay_close_partial();
+        return 0;
+    }
+
+    alignas(8) u8 native_window_raw[0x100];
+    memset(native_window_raw, 0, sizeof(native_window_raw));
+
+    /*
+     * IApplicationDisplayService::CreateStrayLayer is available on the cloned
+     * service. Its display id is the one just returned by OpenDisplay.
+     */
     const struct {
         u32 layer_flags;
         u32 pad;
         u64 display_id;
-    } layer_in = { ViLayerFlags_Default, 0, 0ULL };
-
-    alignas(8) u8 native_window_raw[0x100];
-    memset(native_window_raw, 0, sizeof(native_window_raw));
+    } layer_in = {
+        ViLayerFlags_Default, 0, g_display.display_id
+    };
 
     struct {
         u64 layer_id;
         u64 native_window_size;
     } layer_out = {0};
 
-    Result rc = serviceDispatchInOut(
-        create_srv, create_cmd, layer_in, layer_out,
+    rc = serviceDispatchInOut(
+        &g_vi_app, 2030, layer_in, layer_out,
         .buffer_attrs = { SfBufferAttr_Out | SfBufferAttr_HipcMapAlias },
         .buffers = { { native_window_raw, sizeof(native_window_raw) } });
 
     if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] CreateStrayLayer cmd=%u failed: 0x%x\n",
-                    create_cmd, rc);
+        debugPrintf("[jar-ui] clone VI CreateStrayLayer failed: 0x%x\n", rc);
         overlay_close_partial();
         return 0;
     }
@@ -271,6 +289,11 @@ static int overlay_init(void) {
     }
     g_layer.igbp_binder_obj_id = binder_id;
 
+    /*
+     * The cloned application service owns the layer, while the global system
+     * service handles the layer geometry. Keep it at the maximum z-order so
+     * the import card is above the Godot managed layer.
+     */
     rc = viSetLayerSize(&g_layer, OVERLAY_W, OVERLAY_H);
     if (R_FAILED(rc))
         debugPrintf("[jar-ui] stray viSetLayerSize failed: 0x%x\n", rc);
@@ -283,9 +306,10 @@ static int overlay_init(void) {
     if (R_FAILED(rc))
         debugPrintf("[jar-ui] stray viSetLayerScalingMode failed: 0x%x\n", rc);
 
+    Service *vi_sys = viGetSession_ISystemDisplayService();
     if (serviceIsActive(vi_sys)) {
         s64 zmax = 0;
-        u64 display_id = 0;
+        u64 display_id = g_display.display_id;
         rc = serviceDispatchInOut(vi_sys, 1202, display_id, zmax);
         if (R_SUCCEEDED(rc)) {
             rc = viSetLayerZ(&g_layer, (s32)zmax);
@@ -324,8 +348,9 @@ static int overlay_init(void) {
     }
 
     g_ready = 1;
-    debugPrintf("[jar-ui] progress layer ready (stray layer=%llu cmd=%u)\n",
-                (unsigned long long)g_layer.layer_id, create_cmd);
+    debugPrintf("[jar-ui] progress layer ready (cloned VI layer=%llu display=%llu)\n",
+                (unsigned long long)g_layer.layer_id,
+                (unsigned long long)g_display.display_id);
     return 1;
 }
 
