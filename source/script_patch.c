@@ -737,11 +737,16 @@ static int patch_bool_property_token_buffer(
   }
 
   for (unsigned k = 0; k < count; k++) {
-    if (found[k] != 1) {
+    const unsigned expected = patches[k].expected_uses;
+    const int count_ok = expected == 0 ? (found[k] > 0) : (found[k] == expected);
+
+    if (!count_ok) {
       debugPrintf(
-        "[script]   bool property \"%s\": %u matches, expected 1\n",
+        "[script]   bool property \"%s\": %u matches, expected %s%u\n",
         patches[k].identifier,
-        found[k]
+        found[k],
+        expected == 0 ? "at least " : "",
+        expected
       );
 
       free(offsets);
@@ -749,10 +754,11 @@ static int patch_bool_property_token_buffer(
     }
 
     debugPrintf(
-      "[script]   bool property \"%s\": %d -> %d\n",
+      "[script]   bool property \"%s\": %d -> %d (%u matches)\n",
       patches[k].identifier,
       patches[k].expected_value,
-      patches[k].new_value
+      patches[k].new_value,
+      found[k]
     );
   }
 
