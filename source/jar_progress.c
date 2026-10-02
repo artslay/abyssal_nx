@@ -245,16 +245,13 @@ static int overlay_init(void) {
      * If there is no applet resource user id (non-applet environment), fall
      * back to libnx's CreateStrayLayer path.
      */
-    ViDisplayName display_name = {};
-    strncpy(display_name.data, "Default", sizeof(display_name.data) - 1);
-
     alignas(8) u8 native_window_raw[0x100];
     u64 native_window_size = 0;
 
     if (appletGetAppletResourceUserId()) {
         rc = appletCreateManagedDisplayLayer(&g_layer_id);
         if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] appletCreateManagedDisplayLayer failed: 0x%x\\n", rc);
+            debugPrintf("[jar-ui] appletCreateManagedDisplayLayer failed: 0x%x\n", rc);
             overlay_close_partial();
             return 0;
         }
@@ -279,7 +276,7 @@ static int overlay_init(void) {
                                   } },
                                   .buffers = { { native_window_raw, sizeof(native_window_raw) } });
         if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] vi:u OpenManagedLayer failed: 0x%x\\n", rc);
+            debugPrintf("[jar-ui] vi:u OpenManagedLayer failed: 0x%x\n", rc);
             overlay_close_partial();
             return 0;
         }
@@ -301,7 +298,7 @@ static int overlay_init(void) {
                                   } },
                                   .buffers = { { native_window_raw, sizeof(native_window_raw) } });
         if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] vi:u CreateStrayLayer failed: 0x%x\\n", rc);
+            debugPrintf("[jar-ui] vi:u CreateStrayLayer failed: 0x%x\n", rc);
             overlay_close_partial();
             return 0;
         }
@@ -314,7 +311,7 @@ static int overlay_init(void) {
 
     if (native_window_size > sizeof(native_window_raw) ||
         native_window_size < sizeof(ParcelHeader)) {
-        debugPrintf("[jar-ui] vi:u layer parcel size invalid: 0x%llx\\n",
+        debugPrintf("[jar-ui] vi:u layer parcel size invalid: 0x%llx\n",
                     (unsigned long long)native_window_size);
         overlay_close_partial();
         return 0;
@@ -324,7 +321,7 @@ static int overlay_init(void) {
     if (hdr->payload_off > native_window_size ||
         hdr->payload_size > native_window_size - hdr->payload_off ||
         hdr->payload_size < 3 * sizeof(u32)) {
-        debugPrintf("[jar-ui] vi:u layer parcel invalid off=0x%x size=0x%x total=0x%llx\\n",
+        debugPrintf("[jar-ui] vi:u layer parcel invalid off=0x%x size=0x%x total=0x%llx\n",
                     hdr->payload_off, hdr->payload_size,
                     (unsigned long long)native_window_size);
         overlay_close_partial();
@@ -334,7 +331,7 @@ static int overlay_init(void) {
     u32 *payload = (u32 *)&native_window_raw[hdr->payload_off];
     const u32 binder_id = payload[2];
     if (!binder_id) {
-        debugPrintf("[jar-ui] vi:u layer returned empty IGBP binder id\\n");
+        debugPrintf("[jar-ui] vi:u layer returned empty IGBP binder id\n");
         overlay_close_partial();
         return 0;
     }
