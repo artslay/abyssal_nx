@@ -14,24 +14,19 @@
 extern void debugPrintf(const char *fmt, ...);
 
 /*
- * libnx creates its default VI window before main() via __nx_win_init().
- * Reopening "Default" through the global vi service therefore fails with
- * VI's operation-failed result. The import overlay uses its own vi:u service
- * sessions instead, leaving the engine's default window untouched.
+ * libnx creates the default managed layer before main(). A second managed
+ * layer is rejected by VI, so the importer uses a stray application layer.
+ * The existing global libnx VI sessions are reused; opening "Default" again
+ * is deliberately avoided.
  */
-static Service g_vi_root;
-static Service g_vi_app;
-static Service g_vi_relay;
-static u64 g_display_id;
-static u64 g_layer_id;
+static ViLayer g_layer;
 static NWindow g_window;
 static Framebuffer g_fb;
-static int g_vi_open;
-static int g_display_open;
 static int g_layer_open;
-static int g_layer_managed;
 static int g_ready;
 static uint64_t g_last_tick;
+
+#define OVERLAY_DISPLAY_ID 0ULL
 
 #define OVERLAY_W 1280u
 #define OVERLAY_H 720u
@@ -152,164 +147,66 @@ static void overlay_close_partial(void) {
     }
 
     if (g_layer_open) {
-        const u32 close_cmd = g_layer_managed ? 2021 : 2031;
-        Result rc = serviceDispatchIn(&g_vi_app, close_cmd, g_layer_id);
+        Result rc = viCloseLayer(&g_layer);
         if (R_FAILED(rc))
-            debugPrintf("[jar-ui] close layer failed (cmd=%u): 0x%x\n", close_cmd, rc);
+            debugPrintf("[jar-ui] close stray layer failed: 0x%x\n", rc);
+        memset(&g_layer, 0, sizeof(g_layer));
         g_layer_open = 0;
-        g_layer_managed = 0;
-        g_layer_id = 0;
     }
-
-    if (g_display_open) {
-        Result rc = serviceDispatchIn(&g_vi_app, 1020, g_display_id);
-        if (R_FAILED(rc))
-            debugPrintf("[jar-ui] close display failed: 0x%x\n", rc);
-        g_display_open = 0;
-        g_display_id = 0;
-    }
-
-    if (serviceIsActive(&g_vi_relay))
-        serviceClose(&g_vi_relay);
-    if (serviceIsActive(&g_vi_app))
-        serviceClose(&g_vi_app);
-    if (serviceIsActive(&g_vi_root))
-        serviceClose(&g_vi_root);
-
-    memset(&g_vi_relay, 0, sizeof(g_vi_relay));
-    memset(&g_vi_app, 0, sizeof(g_vi_app));
-    memset(&g_vi_root, 0, sizeof(g_vi_root));
-    g_vi_open = 0;
 }
 
 static int overlay_init(void) {
     if (g_ready) return 1;
 
-    if (!g_vi_open) {
-        /*
-         * Do not call viInitialize()/viOpenDefaultDisplay() here. libnx has
-         * already initialized its process-global VI session and opened the
-         * Default display for nwindowGetDefault(). Use an independent
-         * application VI session (vi:u) for this transient overlay.
-         */
-        Result rc = smGetService(&g_vi_root, "vi:u");
-        if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] smGetService(vi:u) failed: 0x%x\n", rc);
-            return 0;
-        }
-
-        const u32 service_type = 0; // ViServiceType_Application
-        rc = serviceDispatchIn(&g_vi_root, 0, service_type,
-                               .out_num_objects = 1,
-                               .out_objects = &g_vi_app);
-        if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] vi:u application session failed: 0x%x\n", rc);
-            overlay_close_partial();
-            return 0;
-        }
-
-        rc = serviceDispatch(&g_vi_app, 100,
-                             .out_num_objects = 1,
-                             .out_objects = &g_vi_relay);
-        if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] vi:u binder relay failed: 0x%x\n", rc);
-            overlay_close_partial();
-            return 0;
-        }
-
-        g_vi_open = 1;
-    }
-
-    Result rc;
-    struct {
-        u64 display_id;
-    } display_out = {0};
-
-    ViDisplayName display_name = {};
-    strncpy(display_name.data, "Default", sizeof(display_name.data) - 1);
-    rc = serviceDispatchInOut(&g_vi_app, 1010, display_name, display_out);
-    if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] vi:u OpenDisplay(Default) failed: 0x%x\n", rc);
-        overlay_close_partial();
+    /*
+     * nwindowGetDefault() caused libnx to initialize VI and consume the
+     * application's managed display layer before main(). Do not call
+     * viInitialize(), viOpenDefaultDisplay(), or appletCreateManagedDisplayLayer()
+     * here. Instead create an additional stray layer on the already-open
+     * application's VI session.
+     */
+    Service *vi_app = viGetSession_IApplicationDisplayService();
+    Service *vi_relay = viGetSession_IHOSBinderDriverRelay();
+    if (!serviceIsActive(vi_app) || !serviceIsActive(vi_relay)) {
+        debugPrintf("[jar-ui] global VI application/binder sessions inactive\n");
         return 0;
     }
-    g_display_id = display_out.display_id;
-    g_display_open = 1;
 
-    /*
-     * Match libnx's normal NWindow path. Applet applications get a managed
-     * display layer from appletCreateManagedDisplayLayer(), then VI command
-     * 2020 opens that layer and returns the IGraphicBufferProducer parcel.
-     * This is preferable to a stray layer because the compositor associates
-     * the managed layer with this application.
-     *
-     * If there is no applet resource user id (non-applet environment), fall
-     * back to libnx's CreateStrayLayer path.
-     */
     alignas(8) u8 native_window_raw[0x100];
     u64 native_window_size = 0;
 
-    if (appletGetAppletResourceUserId()) {
-        rc = appletCreateManagedDisplayLayer(&g_layer_id);
-        if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] appletCreateManagedDisplayLayer failed: 0x%x\n", rc);
-            overlay_close_partial();
-            return 0;
-        }
-        g_layer_managed = 1;
+    const struct {
+        u32 layer_flags;
+        u32 pad;
+        u64 display_id;
+    } layer_in = { ViLayerFlags_Default, 0, OVERLAY_DISPLAY_ID };
+    struct {
+        u64 layer_id;
+        u64 native_window_size;
+    } layer_out = {0};
 
-        const struct {
-            ViDisplayName display_name;
-            u64 layer_id;
-            u64 aruid;
-        } layer_in = {
-            display_name, g_layer_id, appletGetAppletResourceUserId()
-        };
-
-        struct {
-            u64 native_window_size;
-        } layer_out = {0};
-
-        rc = serviceDispatchInOut(&g_vi_app, 2020, layer_in, layer_out,
-                                  .in_send_pid = true,
-                                  .buffer_attrs = { SfBufferAttr_Out | SfBufferAttr_HipcMapAlias },
-                                  .buffers = { { native_window_raw, sizeof(native_window_raw) } });
-        if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] vi:u OpenManagedLayer failed: 0x%x\n", rc);
-            overlay_close_partial();
-            return 0;
-        }
-        native_window_size = layer_out.native_window_size;
-    } else {
-        const struct {
-            u32 layer_flags;
-            u32 pad;
-            u64 display_id;
-        } layer_in = { ViLayerFlags_Default, 0, g_display_id };
-        struct {
-            u64 layer_id;
-            u64 native_window_size;
-        } layer_out = {0};
-
-        rc = serviceDispatchInOut(&g_vi_app, 2030, layer_in, layer_out,
-                                  .buffer_attrs = { SfBufferAttr_Out | SfBufferAttr_HipcMapAlias },
-                                  .buffers = { { native_window_raw, sizeof(native_window_raw) } });
-        if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] vi:u CreateStrayLayer failed: 0x%x\n", rc);
-            overlay_close_partial();
-            return 0;
-        }
-        g_layer_id = layer_out.layer_id;
-        g_layer_managed = 0;
-        native_window_size = layer_out.native_window_size;
+    Result rc = serviceDispatchInOut(
+        vi_app, 2030, layer_in, layer_out,
+        .buffer_attrs = { SfBufferAttr_Out | SfBufferAttr_HipcMapAlias },
+        .buffers = { { native_window_raw, sizeof(native_window_raw) } });
+    if (R_FAILED(rc)) {
+        debugPrintf("[jar-ui] CreateStrayLayer failed: 0x%x\n", rc);
+        return 0;
     }
 
-    g_layer_open = 1;
-
+    native_window_size = layer_out.native_window_size;
     if (native_window_size > sizeof(native_window_raw) ||
         native_window_size < sizeof(ParcelHeader)) {
-        debugPrintf("[jar-ui] vi:u layer parcel size invalid: 0x%llx\n",
+        debugPrintf("[jar-ui] stray layer parcel size invalid: 0x%llx\n",
                     (unsigned long long)native_window_size);
+        /*
+         * We have the layer id, so close it even though the parcel was bad.
+         */
+        memset(&g_layer, 0, sizeof(g_layer));
+        g_layer.layer_id = layer_out.layer_id;
+        g_layer.stray_layer = true;
+        g_layer.initialized = true;
+        g_layer_open = 1;
         overlay_close_partial();
         return 0;
     }
@@ -318,9 +215,14 @@ static int overlay_init(void) {
     if (hdr->payload_off > native_window_size ||
         hdr->payload_size > native_window_size - hdr->payload_off ||
         hdr->payload_size < 3 * sizeof(u32)) {
-        debugPrintf("[jar-ui] vi:u layer parcel invalid off=0x%x size=0x%x total=0x%llx\n",
+        debugPrintf("[jar-ui] stray layer parcel invalid off=0x%x size=0x%x total=0x%llx\n",
                     hdr->payload_off, hdr->payload_size,
                     (unsigned long long)native_window_size);
+        memset(&g_layer, 0, sizeof(g_layer));
+        g_layer.layer_id = layer_out.layer_id;
+        g_layer.stray_layer = true;
+        g_layer.initialized = true;
+        g_layer_open = 1;
         overlay_close_partial();
         return 0;
     }
@@ -328,22 +230,53 @@ static int overlay_init(void) {
     u32 *payload = (u32 *)&native_window_raw[hdr->payload_off];
     const u32 binder_id = payload[2];
     if (!binder_id) {
-        debugPrintf("[jar-ui] vi:u layer returned empty IGBP binder id\n");
+        debugPrintf("[jar-ui] stray layer returned empty IGBP binder id\n");
+        memset(&g_layer, 0, sizeof(g_layer));
+        g_layer.layer_id = layer_out.layer_id;
+        g_layer.stray_layer = true;
+        g_layer.initialized = true;
+        g_layer_open = 1;
         overlay_close_partial();
         return 0;
     }
 
+    memset(&g_layer, 0, sizeof(g_layer));
+    g_layer.layer_id = layer_out.layer_id;
+    g_layer.igbp_binder_obj_id = binder_id;
+    g_layer.stray_layer = true;
+    g_layer.initialized = true;
+    g_layer_open = 1;
 
-    rc = serviceDispatchIn(&g_vi_app, 2101,
-                           ((const struct {
-                               u32 scaling_mode;
-                               u32 pad;
-                               u64 layer_id;
-                           }){ ViScalingMode_FitToLayer, 0, g_layer_id }));
+    /*
+     * Configure the stray layer through the VI sessions libnx already owns.
+     * The application API handles scaling; the system API handles size,
+     * position and z-order. Put the import layer above the default Godot layer.
+     */
+    rc = viSetLayerSize(&g_layer, OVERLAY_W, OVERLAY_H);
     if (R_FAILED(rc))
-        debugPrintf("[jar-ui] vi:u SetLayerScalingMode failed: 0x%x\n", rc);
+        debugPrintf("[jar-ui] stray viSetLayerSize failed: 0x%x\n", rc);
 
-    rc = nwindowCreate(&g_window, &g_vi_relay, (s32)binder_id, false);
+    rc = viSetLayerPosition(&g_layer, 0.0f, 0.0f);
+    if (R_FAILED(rc))
+        debugPrintf("[jar-ui] stray viSetLayerPosition failed: 0x%x\n", rc);
+
+    rc = viSetLayerScalingMode(&g_layer, ViScalingMode_FitToLayer);
+    if (R_FAILED(rc))
+        debugPrintf("[jar-ui] stray viSetLayerScalingMode failed: 0x%x\n", rc);
+
+    s64 zmax = 0;
+    rc = serviceDispatchInOut(viGetSession_ISystemDisplayService(),
+                              1202, OVERLAY_DISPLAY_ID, zmax);
+    if (R_SUCCEEDED(rc)) {
+        rc = viSetLayerZ(&g_layer, (s32)zmax);
+        if (R_FAILED(rc))
+            debugPrintf("[jar-ui] stray viSetLayerZ(%lld) failed: 0x%x\n",
+                        (long long)zmax, rc);
+    } else {
+        debugPrintf("[jar-ui] get display z-max failed: 0x%x\n", rc);
+    }
+
+    rc = nwindowCreate(&g_window, vi_relay, (s32)binder_id, false);
     if (R_FAILED(rc)) {
         debugPrintf("[jar-ui] nwindowCreate overlay failed: 0x%x\n", rc);
         overlay_close_partial();
@@ -370,8 +303,8 @@ static int overlay_init(void) {
     }
 
     g_ready = 1;
-    debugPrintf("[jar-ui] progress layer ready (vi:u layer=%llu)\n",
-                (unsigned long long)g_layer_id);
+    debugPrintf("[jar-ui] progress layer ready (stray layer=%llu)\n",
+                (unsigned long long)g_layer.layer_id);
     return 1;
 }
 
