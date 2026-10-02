@@ -146,16 +146,18 @@ endif
 #---------------------------------------------------------------------------------
 all: $(ROMFS_STAGE)/.stamp $(BUILD)
 
-$(ROMFS_STAGE)/.stamp: $(APK)
+$(ROMFS_STAGE)/.stamp: $(APK) $(TOPDIR)/Makefile
 	@echo Preparing bundled APK payload...
 	@test -f "$(APK)" || (echo "APK not found: $(APK)"; exit 1)
 	@rm -rf "$(ROMFS_STAGE)"
 	@mkdir -p "$(ROMFS_STAGE)"
-	@unzip -q -o "$(APK)" 'assets/*' 'lib/arm64-v8a/libgodot_android.so' 'lib/arm64-v8a/libc++_shared.so' -d "$(ROMFS_STAGE)/.apk"
+	@unzip -q -o "$(APK)" -d "$(ROMFS_STAGE)/.apk"
 	@test -d "$(ROMFS_STAGE)/.apk/assets" || (echo "APK is missing assets/"; exit 1)
 	@test -f "$(ROMFS_STAGE)/.apk/lib/arm64-v8a/libgodot_android.so" || (echo "APK is missing lib/arm64-v8a/libgodot_android.so"; exit 1)
 	@test -f "$(ROMFS_STAGE)/.apk/lib/arm64-v8a/libc++_shared.so" || (echo "APK is missing lib/arm64-v8a/libc++_shared.so"; exit 1)
-	@cp -a "$(ROMFS_STAGE)/.apk/assets" "$(ROMFS_STAGE)/assets"
+	@rm -rf "$(ROMFS_STAGE)/.apk/assets/dexopt" "$(ROMFS_STAGE)/.apk/assets/abyssal-importer"
+	@mkdir -p "$(ROMFS_STAGE)/assets"
+	@cp -a "$(ROMFS_STAGE)/.apk/assets/." "$(ROMFS_STAGE)/assets/"
 	@cp "$(ROMFS_STAGE)/.apk/lib/arm64-v8a/libgodot_android.so" "$(ROMFS_STAGE)/"
 	@cp "$(ROMFS_STAGE)/.apk/lib/arm64-v8a/libc++_shared.so" "$(ROMFS_STAGE)/"
 	@rm -rf "$(ROMFS_STAGE)/.apk"
