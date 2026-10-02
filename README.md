@@ -203,9 +203,9 @@ make
 The build produces:
 
 ```text
-galaxian_nx.nro
-galaxian_nx.nacp
-galaxian_nx.elf
+abyssal_nx.nro
+abyssal_nx.nacp
+abyssal_nx.elf
 ```
 
 ## Project structure
@@ -240,3 +240,21 @@ Game assets and Android libraries are not included in this repository.
 Users must obtain the original game and required files themselves.
 
 Unless otherwise specified, the source code of this project is distributed under the MIT License. See `LICENSE` for details.
+
+
+## Self-contained NRO build
+
+Place the original Android APK next to the Makefile as `abyssal.apk`, or pass its path with `APK=`.
+
+The build extracts only these APK payloads into the NRO ROMFS:
+- `assets/`
+- `lib/arm64-v8a/libgodot_android.so`
+- `lib/arm64-v8a/libc++_shared.so`
+
+Example:
+
+```sh
+make APK=/path/to/abyssal.apk
+```
+
+The resulting `abyssal_nx.nro` reads the bundled game data and both libraries directly from `romfs:/`. They do not need to be copied beside the NRO on the SD card. Writable configuration, shader cache and runtime overrides stay under `/switch/abyssal_nx/save/`.

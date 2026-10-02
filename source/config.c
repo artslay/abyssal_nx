@@ -47,7 +47,7 @@ int read_config(const char *file) {
   strlcpy(config.data_root, DEFAULT_DATA_ROOT, sizeof(config.data_root));
   strlcpy(config.save_root, DEFAULT_SAVE_ROOT, sizeof(config.save_root));
   config.deadzone = 18; // percent; config.txt "deadzone 0" turns it off
-  config.assetpack = 1; // pack loose assets on first boot for faster SD loading
+  config.assetpack = 0; // bundled ROMFS assets are read directly; enable only for a writable data_root
   config.enable_vulkan = 1; // use the Vulkan renderer (NVK) when the driver comes up
 
   FILE *f = fopen(file, "r");

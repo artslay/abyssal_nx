@@ -27,7 +27,6 @@
 #include "patch.h"
 #include "libc_shim.h"
 #include "godot_shim.h"
-#include "hotfix.h"
 #include "asset_pack.h"
 #include "script_patch.h"
 
@@ -87,32 +86,48 @@ static void check_syscalls(void) {
 
 static void check_data(void) {
   struct stat st;
-  if (stat(SO_NAME, &st) < 0)
-    fatal_error("Could not find\n%s.\nPlace it next to the NRO.", SO_NAME);
-  if (stat(CXX_SO_NAME, &st) < 0)
-    fatal_error("Could not find\n%s.\nPlace it next to the NRO.", CXX_SO_NAME);
-  char assets[300];
-  snprintf(assets, sizeof(assets), "%s/assets/project.binary", config.data_root);
-  if (stat(assets, &st) < 0)
-    fatal_error("Could not find\nassets/project.binary.\nCopy the APK's assets/ folder next to the NRO.");
+  char path[320];
+
+  snprintf(path, sizeof(path), "%s/%s", config.data_root, SO_NAME);
+  if (stat(path, &st) < 0)
+    fatal_error("Could not find bundled\n%s.", path);
+
+  snprintf(path, sizeof(path), "%s/%s", config.data_root, CXX_SO_NAME);
+  if (stat(path, &st) < 0)
+    fatal_error("Could not find bundled\n%s.", path);
+
+  snprintf(path, sizeof(path), "%s/assets/project.binary", config.data_root);
+  if (stat(path, &st) < 0)
+    fatal_error("Could not find bundled\n%s.", path);
 }
 
 // Resolve the app's data directory from the launch CWD so the port works from
 // any folder under /switch (not just /switch/galaxian_nx). Falls back to the
 // compile-time default when the CWD doesn't hold libgodot_android.so.
 static void resolve_data_root(void) {
+  struct stat st;
+
+  // Prefer the payload bundled in the NRO ROMFS. This makes the installation
+  // self-contained: no assets/ or shared libraries are required beside the NRO.
+  char bundled[320];
+  snprintf(bundled, sizeof(bundled), "romfs:/%s", SO_NAME);
+  if (stat(bundled, &st) == 0) {
+    snprintf(config.data_root, sizeof(config.data_root), "romfs:");
+    snprintf(config.save_root, sizeof(config.save_root), "%s", DEFAULT_SAVE_ROOT);
+    return;
+  }
+
+  // Development fallback: if no ROMFS payload is present, keep supporting the
+  // traditional loose-file layout next to the NRO.
   char cwd[256];
   if (!getcwd(cwd, sizeof(cwd)) || !cwd[0]) return;
-  // drop any "device:" prefix ("sdmc:/switch/x" -> "/switch/x")
   char *colon = strchr(cwd, ':');
   char *base = colon ? colon + 1 : cwd;
   if (!base[0]) return;
   size_t l = strlen(base);
-  while (l > 1 && base[l - 1] == '/') base[--l] = 0; // strip trailing slashes
-  // only adopt it if the game binary is actually there
+  while (l > 1 && base[l - 1] == '/') base[--l] = 0;
   char so[300];
   snprintf(so, sizeof(so), "%s/%s", base, SO_NAME);
-  struct stat st;
   if (stat(so, &st) != 0) return;
   snprintf(config.data_root, sizeof(config.data_root), "%s", base);
   snprintf(config.save_root, sizeof(config.save_root), "%s/save", base);
@@ -875,14 +890,10 @@ static void game_thread_fn(void *arg) {
       "window/frame_pacing/android/enable_frame_pacing=false\n"
       "window/vsync/vsync_mode=3\n";
     char ovrp[400];
-    snprintf(ovrp, sizeof(ovrp), "%s/assets/override.cfg", config.data_root);
-    FILE *of = fopen(ovrp, "w");
-    if (of) { fputs(ovr_body, of); fclose(of);
-              debugPrintf(">> wrote %s (Android frame pacing disabled)\n", ovrp); }
-    else debugPrintf(">> COULD NOT write %s -- Swappy may deadlock on swapchain recreate\n", ovrp);
-    snprintf(ovrp, sizeof(ovrp), "%s/override.cfg", config.data_root);
-    of = fopen(ovrp, "w");
-    if (of) { fputs(ovr_body, of); fclose(of); }
+    // ROMFS is read-only. Keep the generated override in the writable save
+    // tree; the file-access shim serves _ovr files transparently.
+    snprintf(ovrp, sizeof(ovrp), "%s/_ovr/override.cfg", config.save_root);
+    mkdir(ovrp, 0777);
   }
 
   void *cmdline = jni_new_string_array(nargs, args);
@@ -1114,14 +1125,19 @@ static void load_module(so_module *mod, const char *name, void *base, size_t lim
 int main(void) {
   cpu_boost(1);
 
+  if (R_FAILED(romfsInit()))
+    fatal_error("Could not mount NRO ROMFS.");
+
+  // The bundled payload is read-only, so keep the user config and all generated
+  // caches/overrides on SD instead of trying to write into romfs:/.
+  mkdir(DEFAULT_SAVE_ROOT, 0777);
+
   // Resolve the launch directory before reading config.txt. This matters when
   // the NRO is started through a title override/forwarder: CONFIG_NAME alone
   // could otherwise read or create a different config.txt in the launch CWD.
   resolve_data_root();
   char config_path[320];
-  snprintf(config_path, sizeof(config_path), "%s/%s",
-           config.data_root[0] ? config.data_root : DEFAULT_DATA_ROOT,
-           CONFIG_NAME);
+  snprintf(config_path, sizeof(config_path), "%s/%s", DEFAULT_SAVE_ROOT, CONFIG_NAME);
   if (read_config(config_path) != 0)
     write_config(config_path);
 
@@ -1133,7 +1149,6 @@ int main(void) {
   check_syscalls();
   stats_open();
   check_data();
-  apply_asset_hotfixes(); // restore game data files known to be missing from the APK export
   mkdir(config.save_root, 0777);
   {
     char cache[300];
@@ -1147,6 +1162,7 @@ int main(void) {
     mkdir(cache, 0777);
   }
   write_shader_overrides(); // stage our compat text shaders under <save_root>/_ovr
+  write_frame_pacing_override(); // keep Android Swappy disabled without writing into ROMFS
   setenv("HOME", config.save_root, 1);
 
   // GPU driver tuning, set BEFORE the GL driver comes up in egl_setup().
@@ -1155,7 +1171,7 @@ int main(void) {
   // the driver's small-buffer allocator and corrupts its pool.
   {
     static char scache[300];
-    snprintf(scache, sizeof(scache), "%s/shadercache", config.data_root);
+    snprintf(scache, sizeof(scache), "%s/shadercache", config.save_root);
     mkdir(scache, 0777);
     // Select the GL driver and point the gallium loader at it. The on-disk
     // shader cache (MESA_SHADER_CACHE_*, old MESA_GLSL_CACHE_* as aliases)
@@ -1196,13 +1212,17 @@ int main(void) {
     fatal_error("Could not create the EGL/GLES3 context.");
   }
 
-  debugPrintf("== Galaxy on Fire Switch wrapper booting; build " __DATE__ " " __TIME__ "; data_root=%s ==\n", config.data_root);
+  debugPrintf("== Abyssal Switch wrapper booting; build " __DATE__ " " __TIME__ "; data_root=%s ==\n", config.data_root);
   debugPrintf("== EGL/GLES3 context created (%dx%d) ==\n", screen_width, screen_height);
 
+  char cxx_path[320], game_path[320];
+  snprintf(cxx_path, sizeof(cxx_path), "%s/%s", config.data_root, CXX_SO_NAME);
+  snprintf(game_path, sizeof(game_path), "%s/%s", config.data_root, SO_NAME);
+
   // libc++ first so libgodot's C++ ABI imports resolve against it
-  load_module(&cxx_mod, CXX_SO_NAME, heap_so_base, CXX_SO_SLICE);
+  load_module(&cxx_mod, cxx_path, heap_so_base, CXX_SO_SLICE);
   void *game_base = (char *)heap_so_base + CXX_SO_SLICE;
-  load_module(&game_mod, SO_NAME, game_base, heap_so_limit - CXX_SO_SLICE);
+  load_module(&game_mod, game_path, game_base, heap_so_limit - CXX_SO_SLICE);
 
   galaxian_resolve_imports(&cxx_mod);
   galaxian_resolve_imports(&game_mod);
@@ -1236,7 +1256,7 @@ int main(void) {
   // pack is missing or bad, asset_pack_active() stays false and every asset read
   // falls back to the loose files exactly as before. Overrides (_ovr) are never
   // packed, so the lighting/shader fixes keep working on top of the pack.
-  if (config.assetpack) {
+  if (config.assetpack && strncmp(config.data_root, "romfs:", 6) != 0) {
     char adir[512];
     snprintf(adir, sizeof(adir), "%s/assets", config.data_root);
     if (!asset_pack_stale(adir, config.data_root) && asset_pack_open_existing(config.data_root)) {

@@ -88,6 +88,7 @@ typedef struct {
   const char *identifier;
   int expected_value;
   int new_value;
+  unsigned expected_uses; // 0 = any positive number of matching assignments
 } BoolPropertyPatch;
 
 typedef struct {
@@ -128,7 +129,23 @@ static const ConstPatch k_file_access_const[] = {
 };
 
 static const BoolPropertyPatch k_file_access_bool[] = {
-  { "use_native_dialog", 1, 0 },
+  { "use_native_dialog", 1, 0, 0 },
+};
+
+/*
+ * The current upstream uses the same Android-native FileDialog path for the
+ * Mods texture/audio picker. On Switch we are running the Android Godot build
+ * through our fake JNI layer, so those native dialogs must stay disabled too.
+ * Save transfer has two dialogs (open + save), while image/audio has one.
+ * expected_uses=0 intentionally accepts a future script that gains/removes
+ * another native-dialog assignment, as long as at least one is present.
+ */
+static const BoolPropertyPatch k_image_file_bool[] = {
+  { "use_native_dialog", 1, 0, 0 },
+};
+
+static const BoolPropertyPatch k_save_file_bool[] = {
+  { "use_native_dialog", 1, 0, 0 },
 };
 
 static const ScriptPatch k_scripts[] = {
@@ -154,6 +171,22 @@ static const ScriptPatch k_scripts[] = {
     k_file_access_const,
     1,
     k_file_access_bool,
+    1
+  },
+  {
+    "native/platform/image_file.gdc",
+    "image_file.gdc",
+    NULL,
+    0,
+    k_image_file_bool,
+    1
+  },
+  {
+    "native/platform/save_file.gdc",
+    "save_file.gdc",
+    NULL,
+    0,
+    k_save_file_bool,
     1
   },
 };
@@ -704,11 +737,16 @@ static int patch_bool_property_token_buffer(
   }
 
   for (unsigned k = 0; k < count; k++) {
-    if (found[k] != 1) {
+    const unsigned expected = patches[k].expected_uses;
+    const int count_ok = expected == 0 ? (found[k] > 0) : (found[k] == expected);
+
+    if (!count_ok) {
       debugPrintf(
-        "[script]   bool property \"%s\": %u matches, expected 1\n",
+        "[script]   bool property \"%s\": %u matches, expected %s%u\n",
         patches[k].identifier,
-        found[k]
+        found[k],
+        expected == 0 ? "at least " : "",
+        expected
       );
 
       free(offsets);
@@ -716,10 +754,11 @@ static int patch_bool_property_token_buffer(
     }
 
     debugPrintf(
-      "[script]   bool property \"%s\": %d -> %d\n",
+      "[script]   bool property \"%s\": %d -> %d (%u matches)\n",
       patches[k].identifier,
       patches[k].expected_value,
-      patches[k].new_value
+      patches[k].new_value,
+      found[k]
     );
   }
 

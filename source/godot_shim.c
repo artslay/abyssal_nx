@@ -518,6 +518,7 @@ static char s_script_overrides[MAX_SCRIPT_OVERRIDES][64];
 static int s_script_override_count;
 
 static int is_override_file(const char *base) {
+  if (!strcmp(base, "override.cfg")) return 1;
   if (is_override_shader(base)) return 1;
   for (int i = 0; i < s_script_override_count; i++)
     if (!strcmp(base, s_script_overrides[i])) return 1;
@@ -593,6 +594,17 @@ static int write_override_file(const char *base, const void *data, size_t n) {
 // failed with "Cannot parse shader" (text_selected_fx.gdshader on 1.00.91, taking
 // input_menu.scn and pause_menu.gd down with it). The spaces stay inside that
 // trailing comment. With no original to measure, the copy is written unpadded.
+void write_frame_pacing_override(void) {
+  static const char body[] =
+    "; Written by the Switch wrapper: disable Android Swappy frame pacing.\n"
+    "; There is no Android Choreographer on Switch.\n"
+    "\n[display]\n\n"
+    "window/frame_pacing/android/enable_frame_pacing=false\n"
+    "window/vsync/vsync_mode=3\n";
+  if (!write_override_file("override.cfg", body, sizeof(body) - 1))
+    debugPrintf("[ovr] WARN could not write override.cfg\n");
+}
+
 void write_shader_overrides(void) {
   const char *names[2] = {
     "text_style.gdshader", "text_selected_fx.gdshader",
