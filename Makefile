@@ -144,22 +144,24 @@ endif
 .PHONY: $(BUILD) clean all
 
 #---------------------------------------------------------------------------------
-all: $(ROMFS_STAGE) $(BUILD)
+all: $(ROMFS_STAGE)/.stamp $(BUILD)
 
-$(ROMFS_STAGE): $(APK)
+$(ROMFS_STAGE)/.stamp: $(APK)
 	@echo Preparing bundled APK payload...
-	@rm -rf $@
-	@mkdir -p "$@"
-	@unzip -q "$(APK)" 'assets/*' 'lib/arm64-v8a/libgodot_android.so' 'lib/arm64-v8a/libc++_shared.so' -d "$@/.apk"
-	@test -d "$@/.apk/assets" || (echo "APK is missing assets/"; exit 1)
-	@test -f "$@/.apk/lib/arm64-v8a/libgodot_android.so" || (echo "APK is missing lib/arm64-v8a/libgodot_android.so"; exit 1)
-	@test -f "$@/.apk/lib/arm64-v8a/libc++_shared.so" || (echo "APK is missing lib/arm64-v8a/libc++_shared.so"; exit 1)
-	@cp -a "$@/.apk/assets" "$@/assets"
-	@cp "$@/.apk/lib/arm64-v8a/libgodot_android.so" "$@/"
-	@cp "$@/.apk/lib/arm64-v8a/libc++_shared.so" "$@/"
-	@rm -rf "$@/.apk"
+	@test -f "$(APK)" || (echo "APK not found: $(APK)"; exit 1)
+	@rm -rf "$(ROMFS_STAGE)"
+	@mkdir -p "$(ROMFS_STAGE)"
+	@unzip -q -o "$(APK)" 'assets/*' 'lib/arm64-v8a/libgodot_android.so' 'lib/arm64-v8a/libc++_shared.so' -d "$(ROMFS_STAGE)/.apk"
+	@test -d "$(ROMFS_STAGE)/.apk/assets" || (echo "APK is missing assets/"; exit 1)
+	@test -f "$(ROMFS_STAGE)/.apk/lib/arm64-v8a/libgodot_android.so" || (echo "APK is missing lib/arm64-v8a/libgodot_android.so"; exit 1)
+	@test -f "$(ROMFS_STAGE)/.apk/lib/arm64-v8a/libc++_shared.so" || (echo "APK is missing lib/arm64-v8a/libc++_shared.so"; exit 1)
+	@cp -a "$(ROMFS_STAGE)/.apk/assets" "$(ROMFS_STAGE)/assets"
+	@cp "$(ROMFS_STAGE)/.apk/lib/arm64-v8a/libgodot_android.so" "$(ROMFS_STAGE)/"
+	@cp "$(ROMFS_STAGE)/.apk/lib/arm64-v8a/libc++_shared.so" "$(ROMFS_STAGE)/"
+	@rm -rf "$(ROMFS_STAGE)/.apk"
+	@touch "$@"
 
-$(BUILD): $(ROMFS_STAGE)
+$(BUILD): $(ROMFS_STAGE)/.stamp
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
