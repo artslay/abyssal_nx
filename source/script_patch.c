@@ -59,7 +59,7 @@ size_t ZSTD_compress(void *dst, size_t dstCap, const void *src, size_t srcSize, 
  */
 #define TOKEN_IDENTIFIER 2
 #define TOKEN_LITERAL    3
-#define TOKEN_EQUAL      28
+#define TOKEN_EQUAL      31
 
 #define ZSTD_SKIPPABLE_MAGIC 0x184D2A50u
 #define ZSTD_SKIPPABLE_HEADER_SIZE 8
