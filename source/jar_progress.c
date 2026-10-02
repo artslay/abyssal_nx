@@ -17,6 +17,7 @@ static ViLayer g_layer;
 static NWindow g_window;
 static Framebuffer g_fb;
 static int g_ready;
+static int g_vi_initialized;
 static uint64_t g_last_tick;
 
 #define OVERLAY_W 1280u
@@ -131,9 +132,21 @@ static void text(u32 *pixels, u32 stride, int x, int y, int scale,
 static int overlay_init(void) {
     if (g_ready) return 1;
 
+    if (!g_vi_initialized) {
+        Result rc = viInitialize(ViServiceType_Default);
+        if (R_FAILED(rc)) {
+            debugPrintf("[jar-ui] viInitialize failed: 0x%x\n", rc);
+            return 0;
+        }
+        g_vi_initialized = 1;
+    }
+
     Result rc = viOpenDefaultDisplay(&g_display);
     if (R_FAILED(rc)) {
         debugPrintf("[jar-ui] viOpenDefaultDisplay failed: 0x%x\n", rc);
+        viExit();
+        g_vi_initialized = 0;
+        memset(&g_display, 0, sizeof(g_display));
         return 0;
     }
 
@@ -150,6 +163,8 @@ static int overlay_init(void) {
         debugPrintf("[jar-ui] viSetLayerSize failed: 0x%x\n", rc);
         viCloseLayer(&g_layer);
         viCloseDisplay(&g_display);
+        viExit();
+        g_vi_initialized = 0;
         memset(&g_layer, 0, sizeof(g_layer));
         memset(&g_display, 0, sizeof(g_display));
         return 0;
@@ -189,6 +204,8 @@ static int overlay_init(void) {
         nwindowClose(&g_window);
         viCloseLayer(&g_layer);
         viCloseDisplay(&g_display);
+        viExit();
+        g_vi_initialized = 0;
         memset(&g_window, 0, sizeof(g_window));
         memset(&g_layer, 0, sizeof(g_layer));
         memset(&g_display, 0, sizeof(g_display));
@@ -202,6 +219,8 @@ static int overlay_init(void) {
         nwindowClose(&g_window);
         viCloseLayer(&g_layer);
         viCloseDisplay(&g_display);
+        viExit();
+        g_vi_initialized = 0;
         memset(&g_fb, 0, sizeof(g_fb));
         memset(&g_window, 0, sizeof(g_window));
         memset(&g_layer, 0, sizeof(g_layer));
@@ -277,15 +296,23 @@ void jar_progress_overlay_update(void) {
 }
 
 void jar_progress_overlay_shutdown(void) {
-    if (!g_ready) return;
+    if (!g_ready) {
+        if (g_vi_initialized) {
+            viExit();
+            g_vi_initialized = 0;
+        }
+        return;
+    }
     framebufferClose(&g_fb);
     nwindowClose(&g_window);
     viCloseLayer(&g_layer);
     viCloseDisplay(&g_display);
+    viExit();
     memset(&g_fb, 0, sizeof(g_fb));
     memset(&g_window, 0, sizeof(g_window));
     memset(&g_layer, 0, sizeof(g_layer));
     memset(&g_display, 0, sizeof(g_display));
     g_ready = 0;
+    g_vi_initialized = 0;
     g_last_tick = 0;
 }
