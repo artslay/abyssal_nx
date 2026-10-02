@@ -203,9 +203,9 @@ make
 The build produces:
 
 ```text
-galaxian_nx.nro
-galaxian_nx.nacp
-galaxian_nx.elf
+abyssal_nx.nro
+abyssal_nx.nacp
+abyssal_nx.elf
 ```
 
 ## Project structure
