@@ -834,8 +834,15 @@ static juint call_long(void *recv, FakeID *id, va_list va) {
   if (!strcmp(name, "fileSize") || !strcmp(name, "fileLastModified") || !strcmp(name, "fileLastAccessed")) {
     const char *p = obj_str(va_arg(va, void *));
     char buf[512];
+    char jarbuf[768];
+    const char *resolved = resolve_gd_path(ACCESS_FILESYSTEM, p, buf, sizeof(buf));
+    if (path_is_jar(resolved)) {
+      if (!jar_import_prepare(resolved, config.save_root, jarbuf, sizeof(jarbuf)))
+        return !strcmp(name, "fileSize") ? (juint)-1 : 0;
+      resolved = jarbuf;
+    }
     struct stat st;
-    if (stat(resolve_gd_path(ACCESS_FILESYSTEM, p, buf, sizeof(buf)), &st) != 0)
+    if (stat(resolved, &st) != 0)
       return !strcmp(name, "fileSize") ? (juint)-1 : 0;
     return !strcmp(name, "fileSize") ? (juint)st.st_size : (juint)st.st_mtime;
   }
