@@ -513,7 +513,7 @@ static const char *override_src_for(const char *base) {
 // Is this file one we serve a copy of from <save_root>/_ovr? The compatibility
 // text shaders always; a game script only once script_patch.c has written its
 // patched copy this boot (a copy left over from an earlier boot is never served).
-#define MAX_SCRIPT_OVERRIDES 4
+#define MAX_SCRIPT_OVERRIDES 8
 static char s_script_overrides[MAX_SCRIPT_OVERRIDES][64];
 static int s_script_override_count;
 
