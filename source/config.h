@@ -5,23 +5,23 @@
 #define __CONFIG_H__
 
 // libgodot_android.so is fopen()'d relative to the NRO's directory (the homebrew CWD),
-// so keep it a bare filename: place the NRO next to it in /switch/galaxian_nx/.
+// so keep it a bare filename: place the NRO next to it in /switch/abyssal_nx/.
 #define SO_NAME "libgodot_android.so"
 #define CXX_SO_NAME "libc++_shared.so"
 #define CONFIG_NAME "config.txt"
 #define LOG_NAME "abyssal_debug.log"
 
 // '/'-absolute paths resolved against the default sdmc device. DATA_ROOT holds
-// the app tree the user prepared under /switch/galaxian_nx/
+// the app tree the user prepared under /switch/abyssal_nx/
 // (libgodot_android.so, libc++_shared.so, assets/). SAVE_ROOT holds saves/config.
 // Overridable from config.txt.
-#define DEFAULT_DATA_ROOT "/switch/galaxian_nx"
-#define DEFAULT_SAVE_ROOT "/switch/galaxian_nx/save"
+#define DEFAULT_DATA_ROOT "/switch/abyssal_nx"
+#define DEFAULT_SAVE_ROOT "/switch/abyssal_nx/save"
 
-// absolute so the log lands in the app dir regardless of the launch CWD
+// absolute so the log lands in the app directory regardless of the launch CWD
 #define LOG_PATH "/switch/abyssal_nx/abyssal_debug.log"
 
-// Master debug switch: log file (<data_root>/galaxian_debug.log), boot_stats.txt,
+// Master debug switch: log file (<data_root>/abyssal_debug.log), boot_stats.txt,
 // nxlink stdout, and all debugPrintf/[io]/[audio] output. Set to 1 to diagnose
 // on hardware; 0 for release (no log/stats files written, and faster: no
 // per-line fflush to the SD card).
