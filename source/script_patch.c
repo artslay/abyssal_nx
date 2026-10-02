@@ -88,6 +88,7 @@ typedef struct {
   const char *identifier;
   int expected_value;
   int new_value;
+  unsigned expected_uses; // 0 = any positive number of matching assignments
 } BoolPropertyPatch;
 
 typedef struct {
@@ -128,7 +129,23 @@ static const ConstPatch k_file_access_const[] = {
 };
 
 static const BoolPropertyPatch k_file_access_bool[] = {
-  { "use_native_dialog", 1, 0 },
+  { "use_native_dialog", 1, 0, 0 },
+};
+
+/*
+ * The current upstream uses the same Android-native FileDialog path for the
+ * Mods texture/audio picker. On Switch we are running the Android Godot build
+ * through our fake JNI layer, so those native dialogs must stay disabled too.
+ * Save transfer has two dialogs (open + save), while image/audio has one.
+ * expected_uses=0 intentionally accepts a future script that gains/removes
+ * another native-dialog assignment, as long as at least one is present.
+ */
+static const BoolPropertyPatch k_image_file_bool[] = {
+  { "use_native_dialog", 1, 0, 0 },
+};
+
+static const BoolPropertyPatch k_save_file_bool[] = {
+  { "use_native_dialog", 1, 0, 0 },
 };
 
 static const ScriptPatch k_scripts[] = {
@@ -154,6 +171,22 @@ static const ScriptPatch k_scripts[] = {
     k_file_access_const,
     1,
     k_file_access_bool,
+    1
+  },
+  {
+    "native/platform/image_file.gdc",
+    "image_file.gdc",
+    NULL,
+    0,
+    k_image_file_bool,
+    1
+  },
+  {
+    "native/platform/save_file.gdc",
+    "save_file.gdc",
+    NULL,
+    0,
+    k_save_file_bool,
     1
   },
 };
