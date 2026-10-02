@@ -17,6 +17,13 @@ int jar_import_prepare(const char *jar_path,
 
 const char *jar_import_error(void);
 
+/* Live progress for the Switch import overlay. */
+int jar_import_progress_active(void);
+int jar_import_progress_read(char *stage, unsigned stage_size,
+                             char *detail, unsigned detail_size,
+                             unsigned *percent, unsigned *done,
+                             unsigned *total);
+
 #ifdef __cplusplus
 }
 #endif
