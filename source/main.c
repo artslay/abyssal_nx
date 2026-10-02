@@ -223,6 +223,63 @@ static int egl_setup(void) {
 }
 
 // ---------------------------------------------------------------------------
+// Temporary JAR-import progress screen. The importer runs on the game thread,
+// while the libnx main thread remains in appletMainLoop(), so the main thread can
+// keep this small text console updated without blocking the conversion itself.
+// ---------------------------------------------------------------------------
+
+static int s_jar_import_console = 0;
+
+static void jar_import_screen_update(void) {
+  char stage[96];
+  char detail[256];
+  unsigned percent = 0, done = 0, total = 0;
+  const int active = jar_import_progress_read(
+    stage, sizeof(stage),
+    detail, sizeof(detail),
+    &percent, &done, &total);
+
+  if (!active) {
+    if (s_jar_import_console) {
+      consoleClear();
+      consoleExit(NULL);
+      s_jar_import_console = 0;
+    }
+    return;
+  }
+
+  if (!s_jar_import_console) {
+    consoleInit(NULL);
+    s_jar_import_console = 1;
+  }
+
+  consoleClear();
+
+  const unsigned width = 36;
+  unsigned filled = (percent * width) / 100;
+  if (filled > width) filled = width;
+
+  printf("\n\n");
+  printf("              JAR IMPORT\n");
+  printf("\n");
+  printf("  %s\n\n", stage);
+  printf("  [");
+  for (unsigned i = 0; i < width; ++i)
+    printf("%s", i < filled ? "#" : ".");
+  printf("] %3u%%\n\n", percent);
+
+  if (total)
+    printf("  Resources: %u / %u\n", done, total);
+  else if (done)
+    printf("  Processed: %u\n", done);
+
+  printf("\n  %s\n", detail);
+  printf("\n\n  Please wait...\n");
+
+  consoleUpdate(NULL);
+}
+
+// ---------------------------------------------------------------------------
 // GodotLib native entry points (platform/android/java_godot_lib_jni.h)
 // ---------------------------------------------------------------------------
 
@@ -1278,6 +1335,9 @@ int main(void) {
     AppletFocusState fs = appletGetFocusState();
     s_focused = (fs == AppletFocusState_InFocus);
 
+    // While a JAR is being converted, show live progress on the Switch screen.
+    jar_import_screen_update();
+
     // hang watchdog: dump the game thread's stack once every 20 s of stall
     if (s_focused) {
       if (s_frames_done != last_frames) {
@@ -1293,6 +1353,11 @@ int main(void) {
   }
 
   if (jni_quit_requested) {
+    if (s_jar_import_console) {
+      consoleExit(NULL);
+      s_jar_import_console = 0;
+    }
+
     // Stop the wrapper-owned threads first. The game quit hook only sets the
     // flag; the current e_step() call must return before the loaded NRO can be
     // torn down by any exit path.
@@ -1335,6 +1400,11 @@ int main(void) {
     // This should only be reachable for an NSO/non-applet environment.
     debugPrintf("[exit] no exit callback after appletExit; svcExitProcess()\n");
     svcExitProcess();
+  }
+
+  if (s_jar_import_console) {
+    consoleExit(NULL);
+    s_jar_import_console = 0;
   }
 
   s_game_running = 0;
