@@ -1162,6 +1162,7 @@ int main(void) {
     mkdir(cache, 0777);
   }
   write_shader_overrides(); // stage our compat text shaders under <save_root>/_ovr
+  write_frame_pacing_override(); // keep Android Swappy disabled without writing into ROMFS
   setenv("HOME", config.save_root, 1);
 
   // GPU driver tuning, set BEFORE the GL driver comes up in egl_setup().
