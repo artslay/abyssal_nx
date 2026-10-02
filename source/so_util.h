@@ -57,13 +57,11 @@ int so_load(so_module *mod, const char *filename, void *base, size_t max_size);
 int so_relocate(so_module *mod);
 int so_resolve(so_module *mod, DynLibFunction *funcs, int num_funcs, int taint_missing_imports);
 void so_execute_init_array(so_module *mod);
-uintptr_t so_find_addr(so_module *mod, const char *symbol);
 uintptr_t so_find_addr_rx(so_module *mod, const char *symbol);
 // returns 0 instead of aborting when the symbol is missing
 uintptr_t so_try_find_addr_rx(so_module *mod, const char *symbol);
 DynLibFunction *so_find_import(DynLibFunction *funcs, int num_funcs, const char *name);
 void so_finalize(so_module *mod);
-int so_unload(so_module *mod);
 
 // dl_iterate_phdr() replacement operating on all loaded modules;
 // required by the libunwind embedded in libc++_shared.so
