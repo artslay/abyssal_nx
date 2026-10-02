@@ -864,6 +864,12 @@ static void game_thread_fn(void *arg) {
 #if GODOT_VERBOSE
   args[nargs++] = "--verbose";
 #endif
+  // Patch the picker scripts BEFORE GodotLib.setup(). setup() can load and cache
+  // project scripts immediately; patching them afterwards is too late because the
+  // engine may already have parsed the original Android native-dialog setting.
+  // This reads the bundled ROMFS copy and writes only the patched override to save/.
+  script_patches_apply();
+
   // Disable Android frame pacing (Swappy). The actual override file is generated
   // by write_frame_pacing_override() after the writable save tree is mounted.
   // It is served through the file-access shim without touching read-only ROMFS.
@@ -1244,11 +1250,6 @@ int main(void) {
       }
     }
   }
-
-  // Touch-control defaults patched into the game's scripts (script_patch.c). Needs
-  // the engine's zstd, so it runs after the init arrays -- and after the pack, so a
-  // script can also be read from it.
-  script_patches_apply();
 
   // the game sees cwd="/" (getcwd_fake) and stray absolute writes are rebased
   // into save_root (sandbox_path); move the REAL cwd there too so any genuine
