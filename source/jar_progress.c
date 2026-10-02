@@ -6,18 +6,30 @@
 #include <string.h>
 
 #include <switch.h>
+#include <switch/display/parcel.h>
 
 #include "config.h"
 #include "jar_import.h"
 
 extern void debugPrintf(const char *fmt, ...);
 
-static ViDisplay g_display;
-static ViLayer g_layer;
+/*
+ * libnx creates its default VI window before main() via __nx_win_init().
+ * Reopening "Default" through the global vi service therefore fails with
+ * VI's operation-failed result. The import overlay uses its own vi:u service
+ * sessions instead, leaving the engine's default window untouched.
+ */
+static Service g_vi_root;
+static Service g_vi_app;
+static Service g_vi_relay;
+static u64 g_display_id;
+static u64 g_layer_id;
 static NWindow g_window;
 static Framebuffer g_fb;
+static int g_vi_open;
+static int g_display_open;
+static int g_layer_open;
 static int g_ready;
-static int g_vi_initialized;
 static uint64_t g_last_tick;
 
 #define OVERLAY_W 1280u
@@ -129,107 +141,195 @@ static void text(u32 *pixels, u32 stride, int x, int y, int scale,
     }
 }
 
+static void overlay_close_partial(void) {
+    if (g_ready) {
+        framebufferClose(&g_fb);
+        nwindowClose(&g_window);
+        memset(&g_fb, 0, sizeof(g_fb));
+        memset(&g_window, 0, sizeof(g_window));
+        g_ready = 0;
+    }
+
+    if (g_layer_open) {
+        Result rc = serviceDispatchIn(&g_vi_app, 2031, g_layer_id);
+        if (R_FAILED(rc))
+            debugPrintf("[jar-ui] close layer failed: 0x%x\\n", rc);
+        g_layer_open = 0;
+        g_layer_id = 0;
+    }
+
+    if (g_display_open) {
+        Result rc = serviceDispatchIn(&g_vi_app, 1020, g_display_id);
+        if (R_FAILED(rc))
+            debugPrintf("[jar-ui] close display failed: 0x%x\\n", rc);
+        g_display_open = 0;
+        g_display_id = 0;
+    }
+
+    if (serviceIsActive(&g_vi_relay))
+        serviceClose(&g_vi_relay);
+    if (serviceIsActive(&g_vi_app))
+        serviceClose(&g_vi_app);
+    if (serviceIsActive(&g_vi_root))
+        serviceClose(&g_vi_root);
+
+    memset(&g_vi_relay, 0, sizeof(g_vi_relay));
+    memset(&g_vi_app, 0, sizeof(g_vi_app));
+    memset(&g_vi_root, 0, sizeof(g_vi_root));
+    g_vi_open = 0;
+}
+
 static int overlay_init(void) {
     if (g_ready) return 1;
 
-    if (!g_vi_initialized) {
-        Result rc = viInitialize(ViServiceType_Default);
+    if (!g_vi_open) {
+        /*
+         * Do not call viInitialize()/viOpenDefaultDisplay() here. libnx has
+         * already initialized its process-global VI session and opened the
+         * Default display for nwindowGetDefault(). Use an independent
+         * application VI session (vi:u) for this transient overlay.
+         */
+        Result rc = smGetService(&g_vi_root, "vi:u");
         if (R_FAILED(rc)) {
-            debugPrintf("[jar-ui] viInitialize failed: 0x%x\n", rc);
+            debugPrintf("[jar-ui] smGetService(vi:u) failed: 0x%x\\n", rc);
             return 0;
         }
-        g_vi_initialized = 1;
+
+        rc = serviceDispatchIn(&g_vi_root, 0, 0,
+                               .out_num_objects = 1,
+                               .out_objects = &g_vi_app);
+        if (R_FAILED(rc)) {
+            debugPrintf("[jar-ui] vi:u application session failed: 0x%x\\n", rc);
+            overlay_close_partial();
+            return 0;
+        }
+
+        rc = serviceDispatch(&g_vi_app, 100,
+                             .out_num_objects = 1,
+                             .out_objects = &g_vi_relay);
+        if (R_FAILED(rc)) {
+            debugPrintf("[jar-ui] vi:u binder relay failed: 0x%x\\n", rc);
+            overlay_close_partial();
+            return 0;
+        }
+
+        g_vi_open = 1;
     }
 
-    Result rc = viOpenDefaultDisplay(&g_display);
+    Result rc;
+    struct {
+        u64 display_id;
+    } display_out = {0};
+
+    rc = serviceDispatchInOut(&g_vi_app, 1010,
+                              (ViDisplayName){{"Default"}},
+                              display_out);
     if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] viOpenDefaultDisplay failed: 0x%x\n", rc);
-        viExit();
-        g_vi_initialized = 0;
-        memset(&g_display, 0, sizeof(g_display));
+        debugPrintf("[jar-ui] vi:u OpenDisplay(Default) failed: 0x%x\\n", rc);
+        overlay_close_partial();
+        return 0;
+    }
+    g_display_id = display_out.display_id;
+    g_display_open = 1;
+
+    /*
+     * CreateStrayLayer is the same operation libnx uses for a non-managed
+     * window. We only need the IGraphicBufferProducer binder object from the
+     * returned native-window parcel; no System/Manager VI session is needed
+     * because we deliberately leave size/position/z-order at compositor
+     * defaults and configure the NWindow itself to 1280x720.
+     */
+    alignas(8) u8 native_window_raw[0x100];
+    u64 native_window_size = 0;
+    const struct {
+        u32 layer_flags;
+        u32 pad;
+        u64 display_id;
+    } layer_in = { ViLayerFlags_Default, 0, g_display_id };
+    struct {
+        u64 layer_id;
+        u64 native_window_size;
+    } layer_out = {0};
+
+    rc = serviceDispatchInOut(&g_vi_app, 2030, layer_in, layer_out,
+                              .buffer_attrs = { {
+                                  SfBufferAttr_Out | SfBufferAttr_HipcMapAlias
+                              } },
+                              .buffers = { { native_window_raw, sizeof(native_window_raw) } });
+    if (R_FAILED(rc)) {
+        debugPrintf("[jar-ui] vi:u CreateStrayLayer failed: 0x%x\\n", rc);
+        overlay_close_partial();
         return 0;
     }
 
-    rc = viCreateLayer(&g_display, &g_layer);
-    if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] viCreateLayer failed: 0x%x\n", rc);
-        viCloseDisplay(&g_display);
-        memset(&g_display, 0, sizeof(g_display));
+    if (layer_out.native_window_size > sizeof(native_window_raw) ||
+        layer_out.native_window_size < sizeof(ParcelHeader)) {
+        debugPrintf("[jar-ui] vi:u layer parcel size invalid: 0x%llx\\n",
+                    (unsigned long long)layer_out.native_window_size);
+        overlay_close_partial();
         return 0;
     }
 
-    rc = viSetLayerSize(&g_layer, OVERLAY_W, OVERLAY_H);
-    if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] viSetLayerSize failed: 0x%x\n", rc);
-        viCloseLayer(&g_layer);
-        viCloseDisplay(&g_display);
-        viExit();
-        g_vi_initialized = 0;
-        memset(&g_layer, 0, sizeof(g_layer));
-        memset(&g_display, 0, sizeof(g_display));
+    ParcelHeader *hdr = (ParcelHeader *)native_window_raw;
+    if (hdr->payload_off > layer_out.native_window_size ||
+        hdr->payload_size > layer_out.native_window_size - hdr->payload_off ||
+        hdr->payload_size < 3 * sizeof(u32)) {
+        debugPrintf("[jar-ui] vi:u layer parcel invalid off=0x%x size=0x%x total=0x%llx\\n",
+                    hdr->payload_off, hdr->payload_size,
+                    (unsigned long long)layer_out.native_window_size);
+        overlay_close_partial();
         return 0;
     }
 
-    rc = viSetLayerPosition(&g_layer, 0.0f, 0.0f);
+    u32 *payload = (u32 *)&native_window_raw[hdr->payload_off];
+    const u32 binder_id = payload[2];
+    if (!binder_id) {
+        debugPrintf("[jar-ui] vi:u layer returned empty IGBP binder id\\n");
+        overlay_close_partial();
+        return 0;
+    }
+
+    g_layer_id = layer_out.layer_id;
+    g_layer_open = 1;
+
+    rc = serviceDispatchIn(&g_vi_app, 2101,
+                           ((const struct {
+                               u32 scaling_mode;
+                               u32 pad;
+                               u64 layer_id;
+                           }){ ViScalingMode_FitToLayer, 0, g_layer_id }));
     if (R_FAILED(rc))
-        debugPrintf("[jar-ui] viSetLayerPosition failed: 0x%x\n", rc);
+        debugPrintf("[jar-ui] vi:u SetLayerScalingMode failed: 0x%x\\n", rc);
 
-    s32 zmax = 0;
-    if (R_SUCCEEDED(viGetZOrderCountMax(&g_display, &zmax))) {
-        rc = viSetLayerZ(&g_layer, zmax);
-        if (R_FAILED(rc))
-            debugPrintf("[jar-ui] viSetLayerZ(%d) failed: 0x%x\n", zmax, rc);
-    }
-
-    rc = viSetLayerScalingMode(&g_layer, ViScalingMode_FitToLayer);
-    if (R_FAILED(rc))
-        debugPrintf("[jar-ui] viSetLayerScalingMode failed: 0x%x\n", rc);
-
-    rc = nwindowCreateFromLayer(&g_window, &g_layer);
+    rc = nwindowCreate(&g_window, &g_vi_relay, (s32)binder_id, false);
     if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] nwindowCreateFromLayer failed: 0x%x\n", rc);
-        viCloseLayer(&g_layer);
-        viCloseDisplay(&g_display);
-        memset(&g_layer, 0, sizeof(g_layer));
-        memset(&g_display, 0, sizeof(g_display));
+        debugPrintf("[jar-ui] nwindowCreate overlay failed: 0x%x\\n", rc);
+        overlay_close_partial();
         return 0;
     }
 
-    nwindowSetDimensions(&g_window, OVERLAY_W, OVERLAY_H);
+    rc = nwindowSetDimensions(&g_window, OVERLAY_W, OVERLAY_H);
+    if (R_FAILED(rc))
+        debugPrintf("[jar-ui] nwindowSetDimensions overlay failed: 0x%x\\n", rc);
 
     rc = framebufferCreate(&g_fb, &g_window, OVERLAY_W, OVERLAY_H,
                            PIXEL_FORMAT_RGBA_8888, 1);
     if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] framebufferCreate failed: 0x%x\n", rc);
-        nwindowClose(&g_window);
-        viCloseLayer(&g_layer);
-        viCloseDisplay(&g_display);
-        viExit();
-        g_vi_initialized = 0;
-        memset(&g_window, 0, sizeof(g_window));
-        memset(&g_layer, 0, sizeof(g_layer));
-        memset(&g_display, 0, sizeof(g_display));
+        debugPrintf("[jar-ui] framebufferCreate failed: 0x%x\\n", rc);
+        overlay_close_partial();
         return 0;
     }
 
     rc = framebufferMakeLinear(&g_fb);
     if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] framebufferMakeLinear failed: 0x%x\n", rc);
-        framebufferClose(&g_fb);
-        nwindowClose(&g_window);
-        viCloseLayer(&g_layer);
-        viCloseDisplay(&g_display);
-        viExit();
-        g_vi_initialized = 0;
-        memset(&g_fb, 0, sizeof(g_fb));
-        memset(&g_window, 0, sizeof(g_window));
-        memset(&g_layer, 0, sizeof(g_layer));
-        memset(&g_display, 0, sizeof(g_display));
+        debugPrintf("[jar-ui] framebufferMakeLinear failed: 0x%x\\n", rc);
+        overlay_close_partial();
         return 0;
     }
 
     g_ready = 1;
-    debugPrintf("[jar-ui] progress layer ready\n");
+    debugPrintf("[jar-ui] progress layer ready (vi:u layer=%llu)\\n",
+                (unsigned long long)g_layer_id);
     return 1;
 }
 
@@ -296,23 +396,6 @@ void jar_progress_overlay_update(void) {
 }
 
 void jar_progress_overlay_shutdown(void) {
-    if (!g_ready) {
-        if (g_vi_initialized) {
-            viExit();
-            g_vi_initialized = 0;
-        }
-        return;
-    }
-    framebufferClose(&g_fb);
-    nwindowClose(&g_window);
-    viCloseLayer(&g_layer);
-    viCloseDisplay(&g_display);
-    viExit();
-    memset(&g_fb, 0, sizeof(g_fb));
-    memset(&g_window, 0, sizeof(g_window));
-    memset(&g_layer, 0, sizeof(g_layer));
-    memset(&g_display, 0, sizeof(g_display));
-    g_ready = 0;
-    g_vi_initialized = 0;
+    overlay_close_partial();
     g_last_tick = 0;
 }
