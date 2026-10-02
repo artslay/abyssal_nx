@@ -19,6 +19,13 @@ SOURCES		:=	source
 DATA		:=	data
 INCLUDES	:=	source
 
+# Bundle the original APK payload into the NRO ROMFS. The APK itself is never
+# copied to the NRO; only assets/ and the two arm64-v8a shared libraries are kept.
+APK		?= $(CURDIR)/abyssal.apk
+ROMFS_STAGE	:= $(CURDIR)/$(BUILD)/romfs-stage
+ROMFS		:= $(ROMFS_STAGE)
+export ROMFS
+
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
@@ -131,15 +138,28 @@ ifneq ($(APP_TITLEID),)
 endif
 
 ifneq ($(ROMFS),)
-	export NROFLAGS += --romfsdir=$(CURDIR)/$(ROMFS)
+	export NROFLAGS += --romfsdir=$(ROMFS)
 endif
 
 .PHONY: $(BUILD) clean all
 
 #---------------------------------------------------------------------------------
-all: $(BUILD)
+all: $(ROMFS_STAGE) $(BUILD)
 
-$(BUILD):
+$(ROMFS_STAGE): $(APK)
+	@echo Preparing bundled APK payload...
+	@rm -rf $@
+	@mkdir -p "$@"
+	@unzip -q "$(APK)" 'assets/*' 'lib/arm64-v8a/libgodot_android.so' 'lib/arm64-v8a/libc++_shared.so' -d "$@/.apk"
+	@test -d "$@/.apk/assets" || (echo "APK is missing assets/"; exit 1)
+	@test -f "$@/.apk/lib/arm64-v8a/libgodot_android.so" || (echo "APK is missing lib/arm64-v8a/libgodot_android.so"; exit 1)
+	@test -f "$@/.apk/lib/arm64-v8a/libc++_shared.so" || (echo "APK is missing lib/arm64-v8a/libc++_shared.so"; exit 1)
+	@cp -a "$@/.apk/assets" "$@/assets"
+	@cp "$@/.apk/lib/arm64-v8a/libgodot_android.so" "$@/"
+	@cp "$@/.apk/lib/arm64-v8a/libc++_shared.so" "$@/"
+	@rm -rf "$@/.apk"
+
+$(BUILD): $(ROMFS_STAGE)
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
