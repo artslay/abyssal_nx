@@ -59,7 +59,6 @@ size_t ZSTD_compress(void *dst, size_t dstCap, const void *src, size_t srcSize, 
  */
 #define TOKEN_IDENTIFIER 2
 #define TOKEN_LITERAL    3
-#define TOKEN_EQUAL      31
 
 #define ZSTD_SKIPPABLE_MAGIC 0x184D2A50u
 #define ZSTD_SKIPPABLE_HEADER_SIZE 8
@@ -619,7 +618,7 @@ static int patch_bool_property_token_buffer(
 
   p += (size_t)lines * 16;
 
-  int state[MAX_BOOL_PATCHES] = {0};
+  unsigned char pending[MAX_BOOL_PATCHES] = {0};
   unsigned found[MAX_BOOL_PATCHES] = {0};
 
   for (uint32_t i = 0; i < tokens; i++) {
@@ -651,81 +650,54 @@ static int patch_bool_property_token_buffer(
       word >> 8;
 
     for (unsigned k = 0; k < count; k++) {
-
       /*
-       * State 0:
-       * Look for the property identifier.
+       * Find the property identifier and accept the first BOOL literal in
+       * the following few tokens. This deliberately does not depend on the
+       * exact assignment token value, making the patch resilient to changes
+       * in the tokenizer enum while still staying local to the property.
        */
-      if (state[k] == 0) {
+      if (!pending[k]) {
         if (type == TOKEN_IDENTIFIER &&
             wide &&
             index == property_ids[k]) {
-
-          state[k] = 1;
+          pending[k] = 1;
         }
+        continue;
       }
 
-      /*
-       * State 1:
-       * Property identifier must be followed by '='.
-       */
-      else if (state[k] == 1) {
-        if (type == TOKEN_EQUAL) {
-          state[k] = 2;
-        } else {
-          state[k] = 0;
-        }
+      if (type == TOKEN_IDENTIFIER && wide) {
+        pending[k] = 0;
+        continue;
       }
 
-      /*
-       * State 2:
-       * '=' must be followed by a BOOL literal.
-       */
-      else if (state[k] == 2) {
-        if (type != TOKEN_LITERAL ||
-            !wide ||
-            index >= constants) {
+      if (type == TOKEN_LITERAL &&
+          wide &&
+          index < constants) {
+        uint8_t *constant = buf + offsets[index];
+        const uint32_t header = read_u32(constant);
 
-          state[k] = 0;
+        if ((header & 0xFF) == VARIANT_BOOL) {
+          const uint32_t current = read_u32(constant + 4);
+          if ((int)current != patches[k].expected_value) {
+            debugPrintf(
+              "[script]   bool property \"%s\": value=%u, expected=%d\n",
+              patches[k].identifier,
+              current,
+              patches[k].expected_value
+            );
+            free(offsets);
+            return 0;
+          }
+
+          write_u32(constant + 4, (uint32_t)patches[k].new_value);
+          found[k]++;
+          pending[k] = 0;
           continue;
         }
-
-        uint8_t *c =
-          buf + offsets[index];
-
-        const uint32_t header =
-          read_u32(c);
-
-        if ((header & 0xFF) != VARIANT_BOOL) {
-          free(offsets);
-          return 0;
-        }
-
-        const uint32_t current =
-          read_u32(c + 4);
-
-        if ((int)current !=
-            patches[k].expected_value) {
-
-          debugPrintf(
-            "[script]   bool property \"%s\": value=%u, expected=%d\n",
-            patches[k].identifier,
-            current,
-            patches[k].expected_value
-          );
-
-          free(offsets);
-          return 0;
-        }
-
-        write_u32(
-          c + 4,
-          (uint32_t)patches[k].new_value
-        );
-
-        found[k]++;
-        state[k] = 0;
       }
+
+      if (++pending[k] > 3)
+        pending[k] = 0;
     }
 
     p += token_len;
@@ -826,7 +798,10 @@ static uint8_t *patch_script(
         script->count
       );
 
-    if (ok) {
+    if (!ok && script->bool_count == 0)
+      goto done;
+
+    if (script->bool_count) {
       ok =
         patch_bool_property_token_buffer(
           out + GDSC_HEADER_SIZE,
@@ -834,6 +809,8 @@ static uint8_t *patch_script(
           script->bool_patches,
           script->bool_count
         );
+    } else {
+      ok = 1;
     }
 
     goto done;
@@ -856,7 +833,7 @@ static uint8_t *patch_script(
         raw_len,
         script->patches,
         script->count
-      )) {
+      ) && script->bool_count == 0) {
     goto done;
   }
 
