@@ -198,7 +198,8 @@ static int overlay_init(void) {
             return 0;
         }
 
-        rc = serviceDispatchIn(&g_vi_root, 0, 0,
+        const u32 service_type = 0; // ViServiceType_Application
+        rc = serviceDispatchIn(&g_vi_root, 0, service_type,
                                .out_num_objects = 1,
                                .out_objects = &g_vi_app);
         if (R_FAILED(rc)) {
@@ -271,9 +272,7 @@ static int overlay_init(void) {
 
         rc = serviceDispatchInOut(&g_vi_app, 2020, layer_in, layer_out,
                                   .in_send_pid = true,
-                                  .buffer_attrs = { {
-                                      SfBufferAttr_Out | SfBufferAttr_HipcMapAlias
-                                  } },
+                                  .buffer_attrs = { SfBufferAttr_Out | SfBufferAttr_HipcMapAlias },
                                   .buffers = { { native_window_raw, sizeof(native_window_raw) } });
         if (R_FAILED(rc)) {
             debugPrintf("[jar-ui] vi:u OpenManagedLayer failed: 0x%x\n", rc);
