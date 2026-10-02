@@ -119,11 +119,11 @@ static const ConstPatch k_save_load[] = {
 /*
  * Godot's FileDialog normally falls back to its own Godot UI when
  * use_native_dialog=false. On Switch there is no Android native picker,
- * so we disable only this property.
+ * so we disable the native dialog and leave the file list unfiltered.
  */
 static const ConstPatch k_file_access_const[] = {
   { "*.abyss ; Private Abyssal content pack ; application/octet-stream,application/zip",
-    "*.jar,*.abyss ; Abyssal content pack   ; application/octet-stream,application/zip",
+    "*                                                                                ",
     0.0, 0.0, 1 },
 };
 
