@@ -31,7 +31,7 @@ namespace {
 
 static std::string g_error;
 
-static std::atomic<unsigned> g_progress_seq{0};
+static std::atomic_flag g_progress_lock = ATOMIC_FLAG_INIT;
 static int g_progress_active = 0;
 static unsigned g_progress_percent = 0;
 static unsigned g_progress_done = 0;
@@ -39,26 +39,35 @@ static unsigned g_progress_total = 0;
 static char g_progress_stage[96] = "Preparing";
 static char g_progress_detail[256] = "Starting JAR import...";
 
+static void progress_lock(void) {
+  while (g_progress_lock.test_and_set(std::memory_order_acquire)) {
+  }
+}
+
+static void progress_unlock(void) {
+  g_progress_lock.clear(std::memory_order_release);
+}
+
 static void progress_set(const char *stage, const char *detail,
                          unsigned percent, unsigned done, unsigned total) {
-  g_progress_seq.fetch_add(1, std::memory_order_acq_rel);
+  progress_lock();
   g_progress_active = 1;
   g_progress_percent = percent > 100 ? 100 : percent;
   g_progress_done = done;
   g_progress_total = total;
   snprintf(g_progress_stage, sizeof(g_progress_stage), "%s", stage ? stage : "");
   snprintf(g_progress_detail, sizeof(g_progress_detail), "%s", detail ? detail : "");
-  g_progress_seq.fetch_add(1, std::memory_order_release);
+  progress_unlock();
 }
 
 static void progress_finish(const char *stage, const char *detail) {
-  g_progress_seq.fetch_add(1, std::memory_order_acq_rel);
+  progress_lock();
   g_progress_percent = 100;
   snprintf(g_progress_stage, sizeof(g_progress_stage), "%s", stage ? stage : "Done");
   snprintf(g_progress_detail, sizeof(g_progress_detail), "%s", detail ? detail : "");
   g_progress_done = g_progress_total;
   g_progress_active = 0;
-  g_progress_seq.fetch_add(1, std::memory_order_release);
+  progress_unlock();
 }
 
 
@@ -1453,30 +1462,22 @@ extern "C" int jar_import_progress_read(char *stage, unsigned stage_size,
                                         char *detail, unsigned detail_size,
                                         unsigned *percent, unsigned *done,
                                         unsigned *total) {
-  for (int attempt = 0; attempt < 8; ++attempt) {
-    unsigned seq1 = g_progress_seq.load(std::memory_order_acquire);
-    if (seq1 & 1u) continue;
+  progress_lock();
+  const int active = g_progress_active;
+  const unsigned p = g_progress_percent;
+  const unsigned d = g_progress_done;
+  const unsigned t = g_progress_total;
+  char s[96], x[256];
+  snprintf(s, sizeof(s), "%s", g_progress_stage);
+  snprintf(x, sizeof(x), "%s", g_progress_detail);
+  progress_unlock();
 
-    const int active = g_progress_active;
-    const unsigned p = g_progress_percent;
-    const unsigned d = g_progress_done;
-    const unsigned t = g_progress_total;
-
-    char s[96], x[256];
-    snprintf(s, sizeof(s), "%s", g_progress_stage);
-    snprintf(x, sizeof(x), "%s", g_progress_detail);
-
-    unsigned seq2 = g_progress_seq.load(std::memory_order_acquire);
-    if (seq1 != seq2) continue;
-
-    if (stage && stage_size) snprintf(stage, stage_size, "%s", s);
-    if (detail && detail_size) snprintf(detail, detail_size, "%s", x);
-    if (percent) *percent = p;
-    if (done) *done = d;
-    if (total) *total = t;
-    return active;
-  }
-  return g_progress_active;
+  if (stage && stage_size) snprintf(stage, stage_size, "%s", s);
+  if (detail && detail_size) snprintf(detail, detail_size, "%s", x);
+  if (percent) *percent = p;
+  if (done) *done = d;
+  if (total) *total = t;
+  return active;
 }
 
 extern "C" int jar_import_prepare(const char*jar_path,const char*cache_root,char*out_path,unsigned out_size){
