@@ -292,9 +292,7 @@ static int overlay_init(void) {
         } layer_out = {0};
 
         rc = serviceDispatchInOut(&g_vi_app, 2030, layer_in, layer_out,
-                                  .buffer_attrs = { {
-                                      SfBufferAttr_Out | SfBufferAttr_HipcMapAlias
-                                  } },
+                                  .buffer_attrs = { SfBufferAttr_Out | SfBufferAttr_HipcMapAlias },
                                   .buffers = { { native_window_raw, sizeof(native_window_raw) } });
         if (R_FAILED(rc)) {
             debugPrintf("[jar-ui] vi:u CreateStrayLayer failed: 0x%x\n", rc);
