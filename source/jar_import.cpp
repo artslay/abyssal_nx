@@ -1443,26 +1443,32 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
   }
 }
 
-int jar_import_progress_active(void) {
+} 
+
+extern "C" int jar_import_progress_active(void) {
   return g_progress_active;
 }
 
-int jar_import_progress_read(char *stage, unsigned stage_size,
-                             char *detail, unsigned detail_size,
-                             unsigned *percent, unsigned *done,
-                             unsigned *total) {
+extern "C" int jar_import_progress_read(char *stage, unsigned stage_size,
+                                        char *detail, unsigned detail_size,
+                                        unsigned *percent, unsigned *done,
+                                        unsigned *total) {
   for (int attempt = 0; attempt < 8; ++attempt) {
     unsigned seq1 = g_progress_seq.load(std::memory_order_acquire);
     if (seq1 & 1u) continue;
+
     const int active = g_progress_active;
     const unsigned p = g_progress_percent;
     const unsigned d = g_progress_done;
     const unsigned t = g_progress_total;
+
     char s[96], x[256];
     snprintf(s, sizeof(s), "%s", g_progress_stage);
     snprintf(x, sizeof(x), "%s", g_progress_detail);
+
     unsigned seq2 = g_progress_seq.load(std::memory_order_acquire);
     if (seq1 != seq2) continue;
+
     if (stage && stage_size) snprintf(stage, stage_size, "%s", s);
     if (detail && detail_size) snprintf(detail, detail_size, "%s", x);
     if (percent) *percent = p;
@@ -1472,8 +1478,6 @@ int jar_import_progress_read(char *stage, unsigned stage_size,
   }
   return g_progress_active;
 }
-
-} 
 
 extern "C" int jar_import_prepare(const char*jar_path,const char*cache_root,char*out_path,unsigned out_size){
   return prepare(jar_path,cache_root,out_path,out_size);
