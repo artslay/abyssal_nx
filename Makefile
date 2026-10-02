@@ -22,7 +22,7 @@ INCLUDES	:=	source
 # Bundle the original APK payload into the NRO ROMFS. The APK itself is never
 # copied to the NRO; only assets/ and the two arm64-v8a shared libraries are kept.
 APK		?= $(CURDIR)/abyssal.apk
-ROMFS_STAGE	:= $(CURDIR)/$(BUILD)/romfs-stage
+ROMFS_STAGE	:= $(TOPDIR)/$(BUILD)/romfs-stage
 ROMFS		:= $(ROMFS_STAGE)
 export ROMFS
 
