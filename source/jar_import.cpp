@@ -57,8 +57,8 @@ static void progress_finish(const char *stage, const char *detail) {
   snprintf(g_progress_stage, sizeof(g_progress_stage), "%s", stage ? stage : "Done");
   snprintf(g_progress_detail, sizeof(g_progress_detail), "%s", detail ? detail : "");
   g_progress_done = g_progress_total;
-  g_progress_seq.fetch_add(1, std::memory_order_release);
   g_progress_active = 0;
+  g_progress_seq.fetch_add(1, std::memory_order_release);
 }
 
 
