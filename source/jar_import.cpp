@@ -1348,9 +1348,9 @@ static void extract_jar(const std::string&jar,const std::string&root){
   for(size_t i=0;i<names.size();++i){const std::string&n=names[i];auto it=z.entries.find(n);if(it==z.entries.end()||n=="META-INF/MANIFEST.MF"||n.empty()||n.back()=='/')continue;if(!safe_name(n))fail("Unsafe JAR entry");if(n.rfind("data/",0)!=0)continue;if(uint64_t(total)+it->second.size>128u*1024u*1024u)fail("JAR exceeds import limits");auto d=z.read(n);total+=d.size();std::string out=root+"/"+n;if(n!=icon){std::string ext=n.substr(n.find_last_of('.')+1);if(ext=="mbac"||ext=="mtra"||ext=="bmp"||ext=="png"){std::vector<uint8_t>u=d;int sz=int(u.size());int count=sz<100?10+sz%10:sz<200?50+sz%20:sz<300?80+sz%20:100+sz%50;if(sz<count)fail("Resource envelope is too short");for(int k=0;k<count;++k)std::swap(u[size_t(k)],u[size_t(sz-1-k)]);d.swap(u);}}write_bin(out,d);
     ++processed_entries;
     const unsigned extract_percent =
-      5u + total_entries
-          ? unsigned((processed_entries * 70u) / (total_entries ? total_entries : 1u))
-          : 70u;
+      total_entries
+        ? 5u + unsigned((processed_entries * 70u) / total_entries)
+        : 75u;
     progress_set("Extracting resources", n.c_str(),
                  extract_percent > 75u ? 75u : extract_percent,
                  unsigned(processed_entries), unsigned(total_entries));
