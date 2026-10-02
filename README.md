@@ -18,8 +18,6 @@ User configuration, shader cache and runtime overrides are stored under:
 /switch/abyssal_nx/save/
 ```
 
-`assets/` and the required Android libraries are bundled into the NRO during the build.
-
 ## JAR import
 
 The Switch port can accept an original DEEP JAR directly from the Import Content file picker.
