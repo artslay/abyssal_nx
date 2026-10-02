@@ -1334,8 +1334,6 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
 static void extract_jar(const std::string&jar,const std::string&root){
   g_model_geometry.clear();
   progress_set("Opening JAR", "Reading archive and validating manifest...", 2, 0, 0);
-  import_console_update("Opening JAR", "Reading archive and validating manifest...",
-                        2, 0, 0, 1);
   ZipReader z(jar);std::string manifest;
   try{auto m=z.read("META-INF/MANIFEST.MF");manifest=std::string(reinterpret_cast<const char*>(m.data()),m.size());}catch(...){fail("Unsupported JAR: not a readable MIDlet archive.");}
   for(size_t p=0;(p=manifest.find("\r\n",p))!=std::string::npos;){manifest.replace(p,2,"\n");}
