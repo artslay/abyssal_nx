@@ -15,6 +15,7 @@ extern "C" void debugPrintf(const char *fmt, ...);
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -30,6 +31,7 @@ extern "C" void debugPrintf(const char *fmt, ...);
 namespace {
 
 static std::string g_error;
+static std::mutex g_prepare_lock;
 
 static std::atomic_flag g_progress_lock = ATOMIC_FLAG_INIT;
 static int g_progress_active = 0;
@@ -1419,6 +1421,7 @@ static void build_pack(const std::string&root,const std::string&jar_sha,const st
 }
 
 static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned out_size){
+  std::lock_guard<std::mutex> prepare_guard(g_prepare_lock);
   if(!jar_path||!cache_root||!out||!out_size){g_error="Invalid importer arguments";return 0;}
   try{
     progress_set("Preparing JAR", "Checking archive...", 0, 0, 0);
