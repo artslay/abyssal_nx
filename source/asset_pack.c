@@ -877,9 +877,13 @@ int asset_pack_fstat_fd(int fd, uint64_t *size, uint64_t *ino, int *directory) {
     return 1;
   }
   if (directory) *directory = 0;
-  int result = asset_pack_stat_relative(g_paths + g_entries[handle->entry].path_offset,
-                                        size, ino);
-  return result;
+  const char *path = g_paths + g_entries[handle->entry].path_offset;
+  if (size) *size = g_entries[handle->entry].size;
+  if (ino) {
+    *ino = fnv_bytes(1469598103934665603ULL, path, strlen(path));
+    if (!*ino) *ino = 1;
+  }
+  return 1;
 }
 
 int asset_pack_close_fd(int fd) {
