@@ -26,6 +26,7 @@ extern "C" void debugPrintf(const char *fmt, ...);
 #include <vector>
 
 #include <zlib.h>
+#include <switch.h>
 
 namespace {
 
@@ -38,6 +39,49 @@ static unsigned g_progress_done = 0;
 static unsigned g_progress_total = 0;
 static char g_progress_stage[96] = "Preparing";
 static char g_progress_detail[256] = "Starting JAR import...";
+static int g_import_console = 0;
+static u64 g_import_console_tick = 0;
+
+static void import_console_update(const char *stage, const char *detail,
+                                  unsigned percent, unsigned done, unsigned total,
+                                  int force) {
+  const u64 now = armGetSystemTick();
+  if (!force && g_import_console_tick != 0 &&
+      armTicksToNs(now - g_import_console_tick) < 50000000ULL)
+    return;
+  g_import_console_tick = now;
+
+  if (!g_import_console) {
+    consoleInit(NULL);
+    g_import_console = 1;
+  }
+
+  consoleClear();
+  const unsigned width = 44;
+  unsigned filled = (percent * width) / 100;
+  if (filled > width) filled = width;
+
+  printf("\n\n                 JAR IMPORT\n\n");
+  printf("  %-28s %3u%%\n\n", stage ? stage : "", percent);
+  printf("  [");
+  for (unsigned i = 0; i < width; ++i)
+    printf("%s", i < filled ? "#" : ".");
+  printf("]\n\n");
+  if (total)
+    printf("  Resources: %u / %u\n", done, total);
+  printf("\n  %s\n\n  Please wait...\n", detail ? detail : "");
+  consoleUpdate(NULL);
+}
+
+static void import_console_finish(const char *stage, const char *detail) {
+  if (!g_import_console)
+    return;
+  import_console_update(stage, detail, 100, 0, 0, 1);
+  consoleExit(NULL);
+  g_import_console = 0;
+  g_import_console_tick = 0;
+}
+
 
 static void progress_lock(void) {
   while (g_progress_lock.test_and_set(std::memory_order_acquire)) {
@@ -57,8 +101,10 @@ static void progress_set(const char *stage, const char *detail,
   g_progress_total = total;
   snprintf(g_progress_stage, sizeof(g_progress_stage), "%s", stage ? stage : "");
   snprintf(g_progress_detail, sizeof(g_progress_detail), "%s", detail ? detail : "");
-  progress_unlock();
+  progress_unlock();  import_console_update(g_progress_stage, g_progress_detail,
+                        g_progress_percent, g_progress_done, g_progress_total, 0);
 }
+
 
 static void progress_finish(const char *stage, const char *detail) {
   progress_lock();
@@ -1333,6 +1379,8 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
 static void extract_jar(const std::string&jar,const std::string&root){
   g_model_geometry.clear();
   progress_set("Opening JAR", "Reading archive and validating manifest...", 2, 0, 0);
+  import_console_update("Opening JAR", "Reading archive and validating manifest...",
+                        2, 0, 0, 1);
   ZipReader z(jar);std::string manifest;
   try{auto m=z.read("META-INF/MANIFEST.MF");manifest=std::string(reinterpret_cast<const char*>(m.data()),m.size());}catch(...){fail("Unsupported JAR: not a readable MIDlet archive.");}
   for(size_t p=0;(p=manifest.find("\r\n",p))!=std::string::npos;){manifest.replace(p,2,"\n");}
@@ -1443,11 +1491,13 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
     snprintf(out,out_size,"%s",pack.c_str());
     g_error.clear();
     progress_finish("Import complete", "JAR converted successfully.");
+    import_console_finish("Import complete", "JAR converted successfully.");
     return 1;
   }catch(const std::exception&e){
     g_error=e.what();
     debugPrintf("[jar] %s\n",g_error.c_str());
     progress_finish("Import failed", g_error.c_str());
+    import_console_finish("Import failed", g_error.c_str());
     return 0;
   }
 }
