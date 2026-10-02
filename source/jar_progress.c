@@ -149,7 +149,7 @@ static void overlay_close_partial(void) {
     }
 
     if (g_layer_open) {
-        Result rc = viCloseLayer(&g_layer);
+        Result rc = serviceDispatchIn(&g_vi_app, 2031, g_layer.layer_id);
         if (R_FAILED(rc))
             debugPrintf("[jar-ui] close stray layer failed: 0x%x\n", rc);
         memset(&g_layer, 0, sizeof(g_layer));
