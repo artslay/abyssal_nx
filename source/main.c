@@ -27,7 +27,6 @@
 #include "patch.h"
 #include "libc_shim.h"
 #include "godot_shim.h"
-#include "hotfix.h"
 #include "asset_pack.h"
 #include "script_patch.h"
 
@@ -1133,7 +1132,6 @@ int main(void) {
   check_syscalls();
   stats_open();
   check_data();
-  apply_asset_hotfixes(); // restore game data files known to be missing from the APK export
   mkdir(config.save_root, 0777);
   {
     char cache[300];
