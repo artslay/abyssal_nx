@@ -29,6 +29,7 @@ static Framebuffer g_fb;
 static int g_vi_open;
 static int g_display_open;
 static int g_layer_open;
+static int g_layer_managed;
 static int g_ready;
 static uint64_t g_last_tick;
 
@@ -151,10 +152,12 @@ static void overlay_close_partial(void) {
     }
 
     if (g_layer_open) {
-        Result rc = serviceDispatchIn(&g_vi_app, 2031, g_layer_id);
+        const u32 close_cmd = g_layer_managed ? 2021 : 2031;
+        Result rc = serviceDispatchIn(&g_vi_app, close_cmd, g_layer_id);
         if (R_FAILED(rc))
-            debugPrintf("[jar-ui] close layer failed: 0x%x\n", rc);
+            debugPrintf("[jar-ui] close layer failed (cmd=%u): 0x%x\n", close_cmd, rc);
         g_layer_open = 0;
+        g_layer_managed = 0;
         g_layer_id = 0;
     }
 
@@ -233,50 +236,97 @@ static int overlay_init(void) {
     g_display_open = 1;
 
     /*
-     * CreateStrayLayer is the same operation libnx uses for a non-managed
-     * window. We only need the IGraphicBufferProducer binder object from the
-     * returned native-window parcel; no System/Manager VI session is needed
-     * because we deliberately leave size/position/z-order at compositor
-     * defaults and configure the NWindow itself to 1280x720.
+     * Match libnx's normal NWindow path. Applet applications get a managed
+     * display layer from appletCreateManagedDisplayLayer(), then VI command
+     * 2020 opens that layer and returns the IGraphicBufferProducer parcel.
+     * This is preferable to a stray layer because the compositor associates
+     * the managed layer with this application.
+     *
+     * If there is no applet resource user id (non-applet environment), fall
+     * back to libnx's CreateStrayLayer path.
      */
+    ViDisplayName display_name = {};
+    strncpy(display_name.data, "Default", sizeof(display_name.data) - 1);
+
     alignas(8) u8 native_window_raw[0x100];
     u64 native_window_size = 0;
-    const struct {
-        u32 layer_flags;
-        u32 pad;
-        u64 display_id;
-    } layer_in = { ViLayerFlags_Default, 0, g_display_id };
-    struct {
-        u64 layer_id;
-        u64 native_window_size;
-    } layer_out = {0};
 
-    rc = serviceDispatchInOut(&g_vi_app, 2030, layer_in, layer_out,
-                              .buffer_attrs = { {
-                                  SfBufferAttr_Out | SfBufferAttr_HipcMapAlias
-                              } },
-                              .buffers = { { native_window_raw, sizeof(native_window_raw) } });
-    if (R_FAILED(rc)) {
-        debugPrintf("[jar-ui] vi:u CreateStrayLayer failed: 0x%x\n", rc);
-        overlay_close_partial();
-        return 0;
+    if (appletGetAppletResourceUserId()) {
+        rc = appletCreateManagedDisplayLayer(&g_layer_id);
+        if (R_FAILED(rc)) {
+            debugPrintf("[jar-ui] appletCreateManagedDisplayLayer failed: 0x%x\\n", rc);
+            overlay_close_partial();
+            return 0;
+        }
+        g_layer_managed = 1;
+
+        const struct {
+            ViDisplayName display_name;
+            u64 layer_id;
+            u64 aruid;
+        } layer_in = {
+            display_name, g_layer_id, appletGetAppletResourceUserId()
+        };
+
+        struct {
+            u64 native_window_size;
+        } layer_out = {0};
+
+        rc = serviceDispatchInOut(&g_vi_app, 2020, layer_in, layer_out,
+                                  .in_send_pid = true,
+                                  .buffer_attrs = { {
+                                      SfBufferAttr_Out | SfBufferAttr_HipcMapAlias
+                                  } },
+                                  .buffers = { { native_window_raw, sizeof(native_window_raw) } });
+        if (R_FAILED(rc)) {
+            debugPrintf("[jar-ui] vi:u OpenManagedLayer failed: 0x%x\\n", rc);
+            overlay_close_partial();
+            return 0;
+        }
+        native_window_size = layer_out.native_window_size;
+    } else {
+        const struct {
+            u32 layer_flags;
+            u32 pad;
+            u64 display_id;
+        } layer_in = { ViLayerFlags_Default, 0, g_display_id };
+        struct {
+            u64 layer_id;
+            u64 native_window_size;
+        } layer_out = {0};
+
+        rc = serviceDispatchInOut(&g_vi_app, 2030, layer_in, layer_out,
+                                  .buffer_attrs = { {
+                                      SfBufferAttr_Out | SfBufferAttr_HipcMapAlias
+                                  } },
+                                  .buffers = { { native_window_raw, sizeof(native_window_raw) } });
+        if (R_FAILED(rc)) {
+            debugPrintf("[jar-ui] vi:u CreateStrayLayer failed: 0x%x\\n", rc);
+            overlay_close_partial();
+            return 0;
+        }
+        g_layer_id = layer_out.layer_id;
+        g_layer_managed = 0;
+        native_window_size = layer_out.native_window_size;
     }
 
-    if (layer_out.native_window_size > sizeof(native_window_raw) ||
-        layer_out.native_window_size < sizeof(ParcelHeader)) {
-        debugPrintf("[jar-ui] vi:u layer parcel size invalid: 0x%llx\n",
-                    (unsigned long long)layer_out.native_window_size);
+    g_layer_open = 1;
+
+    if (native_window_size > sizeof(native_window_raw) ||
+        native_window_size < sizeof(ParcelHeader)) {
+        debugPrintf("[jar-ui] vi:u layer parcel size invalid: 0x%llx\\n",
+                    (unsigned long long)native_window_size);
         overlay_close_partial();
         return 0;
     }
 
     ParcelHeader *hdr = (ParcelHeader *)native_window_raw;
-    if (hdr->payload_off > layer_out.native_window_size ||
-        hdr->payload_size > layer_out.native_window_size - hdr->payload_off ||
+    if (hdr->payload_off > native_window_size ||
+        hdr->payload_size > native_window_size - hdr->payload_off ||
         hdr->payload_size < 3 * sizeof(u32)) {
-        debugPrintf("[jar-ui] vi:u layer parcel invalid off=0x%x size=0x%x total=0x%llx\n",
+        debugPrintf("[jar-ui] vi:u layer parcel invalid off=0x%x size=0x%x total=0x%llx\\n",
                     hdr->payload_off, hdr->payload_size,
-                    (unsigned long long)layer_out.native_window_size);
+                    (unsigned long long)native_window_size);
         overlay_close_partial();
         return 0;
     }
@@ -284,13 +334,11 @@ static int overlay_init(void) {
     u32 *payload = (u32 *)&native_window_raw[hdr->payload_off];
     const u32 binder_id = payload[2];
     if (!binder_id) {
-        debugPrintf("[jar-ui] vi:u layer returned empty IGBP binder id\n");
+        debugPrintf("[jar-ui] vi:u layer returned empty IGBP binder id\\n");
         overlay_close_partial();
         return 0;
     }
 
-    g_layer_id = layer_out.layer_id;
-    g_layer_open = 1;
 
     rc = serviceDispatchIn(&g_vi_app, 2101,
                            ((const struct {
