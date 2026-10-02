@@ -6,57 +6,20 @@ This project is an unofficial fan-made Nintendo Switch port. It loads the origin
 
 ## How to install
 
-Create the following folder on your SD card:
+Copy the built NRO to:
 
 ```text
-/switch/abyssal_nx/
+/switch/abyssal_nx/abyssal_nx.nro
 ```
 
-Place the following files inside:
+User configuration, shader cache and runtime overrides are stored under:
 
 ```text
-/switch/abyssal_nx/
-├── abyssal_nx.nro
-├── libgodot_android.so
-├── libc++_shared.so
-├── config.txt
-└── assets/
-    ├── project.binary
-    └── ...
+/switch/abyssal_nx/save/
 ```
 
-The Android libraries and game data must be obtained from the original Android version of the game.
+`assets/` and the required Android libraries are bundled into the NRO during the build.
 
-## Obtaining the game files
-
-The original Android APK can be obtained from the [abyssal repository](https://github.com/TheWWWorm/abyssal).
-
-Open the APK with an archive utility such as 7-Zip or WinRAR.
-
-The required native libraries are located in:
-
-```text
-lib/arm64-v8a/
-```
-
-Copy:
-
-```text
-libgodot_android.so
-libc++_shared.so
-```
-
-to:
-
-```text
-/switch/abyssal_nx/
-```
-
-Copy the complete `assets/` folder to:
-
-```text
-/switch/abyssal_nx/
-```
 ## JAR import
 
 The Switch port can accept an original DEEP JAR directly from the Import Content file picker.
@@ -130,7 +93,7 @@ The Nintendo Switch controller is mapped to the Godot input system.
 The configuration file is:
 
 ```text
-/switch/abyssal_nx/config.txt
+/switch/abyssal_nx/save/config.txt
 ```
 
 The configuration can be used to adjust the screen resolution, analog deadzone, asset packing and Vulkan rendering.
@@ -187,6 +150,8 @@ Additional dependencies:
 dkp-pacman -S switch-zlib switch-libexpat
 ```
 
+The original Android APK is used as a build input. Place it next to the Makefile as `abyssal.apk`, or pass a different path with `APK=`.
+
 Then build:
 
 ```bash
@@ -198,6 +163,15 @@ For a clean build:
 ```bash
 make clean
 make
+```
+
+The build embeds the APK `assets/` tree and the two arm64-v8a libraries into the NRO ROMFS.
+
+The following APK directories are excluded:
+
+```text
+assets/dexopt/
+assets/abyssal-importer/
 ```
 
 The build produces:
@@ -241,20 +215,3 @@ Users must obtain the original game and required files themselves.
 
 Unless otherwise specified, the source code of this project is distributed under the MIT License. See `LICENSE` for details.
 
-
-## Self-contained NRO build
-
-Place the original Android APK next to the Makefile as `abyssal.apk`, or pass its path with `APK=`.
-
-The build extracts only these APK payloads into the NRO ROMFS:
-- `assets/`
-- `lib/arm64-v8a/libgodot_android.so`
-- `lib/arm64-v8a/libc++_shared.so`
-
-Example:
-
-```sh
-make APK=/path/to/abyssal.apk
-```
-
-The resulting `abyssal_nx.nro` reads the bundled game data and both libraries directly from `romfs:/`. They do not need to be copied beside the NRO on the SD card. Writable configuration, shader cache and runtime overrides stay under `/switch/abyssal_nx/save/`.
