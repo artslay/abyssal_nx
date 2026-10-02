@@ -15,7 +15,7 @@
 // the app tree the user prepared under /switch/abyssal_nx/
 // (libgodot_android.so, libc++_shared.so, assets/). SAVE_ROOT holds saves/config.
 // Overridable from config.txt.
-#define DEFAULT_DATA_ROOT "/switch/abyssal_nx"
+#define DEFAULT_DATA_ROOT "romfs:"
 #define DEFAULT_SAVE_ROOT "/switch/abyssal_nx/save"
 
 // absolute so the log lands in the app directory regardless of the launch CWD
@@ -41,9 +41,8 @@ typedef struct {
   int screen_width;   // render width  (config.txt); with the GPU/vsync this sets
   int screen_height;  // render height (config.txt); the framerate. Default 1280x720.
   int deadzone;       // analog stick deadzone, percent (0 disables); default 18
-  int assetpack;      // 1 (default) = fold the loose assets into an on-device pack
-                      // (assets.nxpack/.nxidx, built on first boot) for fast SD I/O.
-                      // 0 = always read the loose files.
+  int assetpack;      // 0 (default) = read bundled ROMFS assets directly.
+                      // 1 = build an on-device pack only when data_root is writable.
   int enable_vulkan;  // 1 (default) = use Godot's Vulkan renderer (NVK) when the driver
                       // comes up; 0 = force GLES3. Falls back to GLES3 if the probe fails.
   char rendering_method[32]; // override the Vulkan render method ("mobile" by default).
