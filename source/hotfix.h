@@ -8,7 +8,7 @@
 // Writes any known-missing asset files that don't already exist under
 // <data_root>/assets/. Idempotent and silent on files that are already
 // present (never overwrites a user/APK-provided file). Safe to call every
-// boot. See hotfix_credits.h for the specific bug this addresses.
+// boot. Keep this hook for future data fixes discovered in the Android export.
 void apply_asset_hotfixes(void);
 
 #endif
