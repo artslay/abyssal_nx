@@ -687,41 +687,6 @@ failed:
   return 0;
 }
 
-int asset_pack_stat_relative(const char *path, uint64_t *size, uint64_t *ino) {
-  size_t index;
-  if (!find_relative(path, &index)) {
-    return 0;
-  }
-  if (size) *size = g_entries[index].size;
-  if (ino) *ino = 0x5353000000000000ULL | (uint64_t)(index + 1);
-  return 1;
-}
-
-int asset_pack_stat_path(const char *path, uint64_t *size, uint64_t *ino) {
-  char relative[768];
-  if (!normalize_relative(path, relative, sizeof relative)) return 0;
-  return asset_pack_stat_relative(relative, size, ino);
-}
-
-int asset_pack_stat_path_info(const char *path, uint64_t *size, uint64_t *ino,
-                              int *directory) {
-  char relative[768];
-  size_t index;
-  if (!normalize_asset_path(path, relative, sizeof relative, 1)) return 0;
-  if (relative[0] && find_relative(relative, &index)) {
-    if (size) *size = g_entries[index].size;
-    if (ino) *ino = 0x5353000000000000ULL | (uint64_t)(index + 1);
-    if (directory) *directory = 0;
-    return 1;
-  }
-  if (find_directory_relative(relative, ino)) {
-    if (size) *size = 0;
-    if (directory) *directory = 1;
-    return 1;
-  }
-  return 0;
-}
-
 static int add_handle(int fd, uint32_t entry, uint64_t position, uint64_t directory_ino) {
   mutexLock(&g_handle_lock);
   for (int i = 0; i < PACK_HANDLES; i++) {
@@ -964,10 +929,6 @@ int asset_pack_read_all_path(const char *path, void **data, size_t *size) {
 
 size_t asset_pack_entry_count(void) {
   return g_entry_count;
-}
-
-const char *asset_pack_entry_path(size_t index) {
-  return index < g_entry_count ? g_paths + g_entries[index].path_offset : NULL;
 }
 
 void *asset_pack_opendir_path(const char *path) {
