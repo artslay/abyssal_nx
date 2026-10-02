@@ -30,6 +30,7 @@
 #include "asset_pack.h"
 #include "script_patch.h"
 #include "jar_import.h"
+#include "jar_progress.h"
 
 static void *heap_so_base = NULL;
 static size_t heap_so_limit = 0;
@@ -1291,6 +1292,7 @@ int main(void) {
         stall_ms = 0;
       }
     }
+    jar_progress_overlay_update();
     svcSleepThread(16 * 1000 * 1000);
   }
 
