@@ -29,6 +29,7 @@
 #include "godot_shim.h"
 #include "asset_pack.h"
 #include "script_patch.h"
+#include "jar_import.h"
 
 static void *heap_so_base = NULL;
 static size_t heap_so_limit = 0;
