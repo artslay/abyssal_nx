@@ -83,6 +83,7 @@ int      iswxdigit_l_fake(int c, void *loc);
 void    *AAssetManager_fromJava_fake(void *env, void *assetManager);
 void    *AAssetManager_open_fake(void *mgr, const char *filename, int mode);
 void     write_shader_overrides(void); // stage compat text shaders to <save_root>/_ovr
+void     write_frame_pacing_override(void); // stage Android frame-pacing override to <save_root>/_ovr
 int      asset_override_path(const char *filename, char *out, size_t size); // 1 + its _ovr path if we serve a copy of this file
 int      script_override_write(const char *name, const void *data, size_t len); // write + serve a patched script (script_patch.c)
 int      AAsset_read_fake(void *asset, void *buf, size_t count);
