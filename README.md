@@ -30,7 +30,7 @@ When a `.jar` is selected, the native importer:
 - caches the generated pack under:
 
 ```text
-/switch/abyssal_nx/save/_jar_import/<sha256>.abyss
+/switch/abyssal_nx/save/_jar_import_v5/<sha256>.abyss
 ```
 
 The JAR itself is never modified.
