@@ -38,9 +38,6 @@ static const char *resolve_jar_input(const char *path, char *out, size_t out_siz
 #endif
     return NULL;
   }
-#if DEBUG_LOG
-  debugPrintf("[jar] filesystem remap %s -> %s\n", path, out);
-#endif
   return out;
 }
 
