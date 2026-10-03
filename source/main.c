@@ -1116,15 +1116,17 @@ int main(void) {
   // the NRO is started through a title override/forwarder: CONFIG_NAME alone
   // could otherwise read or create a different config.txt in the launch CWD.
   resolve_data_root();
+  mkdir(config.save_root, 0777);
   char config_path[320];
-  snprintf(config_path, sizeof(config_path), "%s/%s", DEFAULT_SAVE_ROOT, CONFIG_NAME);
-  if (read_config(config_path) != 0)
-    write_config(config_path);
+  snprintf(config_path, sizeof(config_path), "%s/%s", config.save_root, CONFIG_NAME);
+  if (read_config(config_path) != 0 && write_config(config_path) != 0)
+    debugPrintf("[config] could not create %s\\n", config_path);
 
   // read_config() resets the runtime roots to their compile-time defaults.
   // Resolve once more so copies launched from another /switch/<folder> keep
   // using the actual folder containing libgodot_android.so and the assets.
   resolve_data_root();
+  mkdir(config.save_root, 0777);
 
   check_syscalls();
   stats_open();
