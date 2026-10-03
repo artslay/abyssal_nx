@@ -31,6 +31,10 @@ namespace {
 
 static std::string g_error;
 static std::mutex g_prepare_lock;
+static std::string g_cached_jar;
+static std::string g_cached_pack;
+static off_t g_cached_jar_size = -1;
+static time_t g_cached_jar_mtime = 0;
 
 [[noreturn]] static void fail(const std::string &s) {
   throw std::runtime_error(s);
@@ -1374,8 +1378,28 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
   std::lock_guard<std::mutex> prepare_guard(g_prepare_lock);
   if(!jar_path||!cache_root||!out||!out_size){g_error="Invalid importer arguments";return 0;}
   try{
-    long size=0;FILE*f=fopen(jar_path,"rb");if(!f)fail("Cannot open JAR");fseek(f,0,SEEK_END);size=ftell(f);fclose(f);if(size<0||size>16*1024*1024)fail("JAR exceeds 16 MiB.");
-    std::string digest=sha256_file(jar_path);std::string base=std::string(cache_root)+"/_jar_import_v5";std::string pack=base+"/"+digest+".abyss";
+    struct stat jar_stat{};
+    if (stat(jar_path, &jar_stat) != 0)
+      fail("Cannot stat JAR");
+    if (jar_stat.st_size < 0 || jar_stat.st_size > 16 * 1024 * 1024)
+      fail("JAR exceeds 16 MiB.");
+
+    std::string digest;
+    std::string pack;
+    if (g_cached_jar == jar_path &&
+        g_cached_jar_size == jar_stat.st_size &&
+        g_cached_jar_mtime == jar_stat.st_mtime &&
+        file_exists(g_cached_pack)) {
+      pack = g_cached_pack;
+    } else {
+      digest = sha256_file(jar_path);
+      std::string base = std::string(cache_root) + "/_jar_import_v5";
+      pack = base + "/" + digest + ".abyss";
+      g_cached_jar = jar_path;
+      g_cached_jar_size = jar_stat.st_size;
+      g_cached_jar_mtime = jar_stat.st_mtime;
+      g_cached_pack = pack;
+    }
     if(!file_exists(pack)){
       debugPrintf("[jar] cache miss: %s\n",pack.c_str());
       std::string work=base+"/"+digest+".work";
