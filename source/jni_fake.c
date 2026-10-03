@@ -439,13 +439,11 @@ static int gd_file_open(const char *path, int mode) {
   char opened[768];
   const char *open_path = buf;
   if (mode == GD_READ && path_is_jar(buf)) {
-    debugPrintf("[jar] selected: %s\n", buf);
     if (!jar_import_prepare(buf, config.save_root, opened, sizeof(opened))) {
       debugPrintf("[jar] conversion failed for %s: %s\n", buf, jar_import_error());
       return -1;
     }
     open_path = opened;
-    debugPrintf("[jar] converted: %s -> %s\n", buf, open_path);
   }
 
   FILE *f = NULL;
