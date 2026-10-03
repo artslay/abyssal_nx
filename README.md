@@ -102,7 +102,6 @@ Example:
 screen_width 1280
 screen_height 720
 deadzone 18
-assetpack 1
 enable_vulkan 1
 ```
 
