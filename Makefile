@@ -155,7 +155,8 @@ $(ROMFS_STAGE)/.stamp: $(APK) $(TOPDIR)/Makefile
 	@test -d "$(ROMFS_STAGE)/.apk/assets" || (echo "APK is missing assets/"; exit 1)
 	@test -f "$(ROMFS_STAGE)/.apk/lib/arm64-v8a/libgodot_android.so" || (echo "APK is missing lib/arm64-v8a/libgodot_android.so"; exit 1)
 	@test -f "$(ROMFS_STAGE)/.apk/lib/arm64-v8a/libc++_shared.so" || (echo "APK is missing lib/arm64-v8a/libc++_shared.so"; exit 1)
-	@rm -rf "$(ROMFS_STAGE)/.apk/assets/dexopt" "$(ROMFS_STAGE)/.apk/assets/abyssal-importer"
+	@rm -rf "$(ROMFS_STAGE)/.apk/assets/.godot" "$(ROMFS_STAGE)/.apk/assets/dexopt" "$(ROMFS_STAGE)/.apk/assets/abyssal-importer"
+	@rm -f "$(ROMFS_STAGE)/.apk/assets/icon.svg" "$(ROMFS_STAGE)/.apk/assets/icon.svg.import" "$(ROMFS_STAGE)/.apk/assets/_cl_"
 	@mkdir -p "$(ROMFS_STAGE)/assets"
 	@cp -a "$(ROMFS_STAGE)/.apk/assets/." "$(ROMFS_STAGE)/assets/"
 	@cp "$(ROMFS_STAGE)/.apk/lib/arm64-v8a/libgodot_android.so" "$(ROMFS_STAGE)/"
