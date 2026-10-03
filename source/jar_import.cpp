@@ -5,7 +5,6 @@
 extern "C" void debugPrintf(const char *fmt, ...);
 
 #include <algorithm>
-#include <atomic>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -32,47 +31,6 @@ namespace {
 
 static std::string g_error;
 static std::mutex g_prepare_lock;
-
-static std::atomic_flag g_progress_lock = ATOMIC_FLAG_INIT;
-static int g_progress_active = 0;
-static unsigned g_progress_percent = 0;
-static unsigned g_progress_done = 0;
-static unsigned g_progress_total = 0;
-static char g_progress_stage[96] = "Preparing";
-static char g_progress_detail[256] = "Starting JAR import...";
-
-static void progress_lock(void) {
-  while (g_progress_lock.test_and_set(std::memory_order_acquire)) {
-  }
-}
-
-static void progress_unlock(void) {
-  g_progress_lock.clear(std::memory_order_release);
-}
-
-static void progress_set(const char *stage, const char *detail,
-                         unsigned percent, unsigned done, unsigned total) {
-  progress_lock();
-  g_progress_active = 1;
-  g_progress_percent = percent > 100 ? 100 : percent;
-  g_progress_done = done;
-  g_progress_total = total;
-  snprintf(g_progress_stage, sizeof(g_progress_stage), "%s", stage ? stage : "");
-  snprintf(g_progress_detail, sizeof(g_progress_detail), "%s", detail ? detail : "");
-  progress_unlock();
-}
-
-
-static void progress_finish(const char *stage, const char *detail) {
-  progress_lock();
-  g_progress_percent = 100;
-  snprintf(g_progress_stage, sizeof(g_progress_stage), "%s", stage ? stage : "Done");
-  snprintf(g_progress_detail, sizeof(g_progress_detail), "%s", detail ? detail : "");
-  g_progress_done = g_progress_total;
-  g_progress_active = 0;
-  progress_unlock();
-}
-
 
 [[noreturn]] static void fail(const std::string &s) {
   throw std::runtime_error(s);
@@ -1335,7 +1293,6 @@ static void build_profile(const std::string&jar,const std::string&root,const Zip
 
 static void extract_jar(const std::string&jar,const std::string&root){
   g_model_geometry.clear();
-  progress_set("Opening JAR", "Reading archive and validating manifest...", 2, 0, 0);
   ZipReader z(jar);std::string manifest;
   try{auto m=z.read("META-INF/MANIFEST.MF");manifest=std::string(reinterpret_cast<const char*>(m.data()),m.size());}catch(...){fail("Unsupported JAR: not a readable MIDlet archive.");}
   for(size_t p=0;(p=manifest.find("\r\n",p))!=std::string::npos;){manifest.replace(p,2,"\n");}
@@ -1355,24 +1312,17 @@ static void extract_jar(const std::string&jar,const std::string&root){
   }
   size_t processed_entries = 0;
   size_t total = 0;
-  progress_set("Extracting resources", "Preparing resource list...", 5, 0,
-               unsigned(total_entries));
   for(size_t i=0;i<names.size();++i){const std::string&n=names[i];auto it=z.entries.find(n);if(it==z.entries.end()||n=="META-INF/MANIFEST.MF"||n.empty()||n.back()=='/')continue;if(!safe_name(n))fail("Unsafe JAR entry");if(n.rfind("data/",0)!=0)continue;if(uint64_t(total)+it->second.size>128u*1024u*1024u)fail("JAR exceeds import limits");auto d=z.read(n);total+=d.size();std::string out=root+"/"+n;if(n!=icon){std::string ext=n.substr(n.find_last_of('.')+1);if(ext=="mbac"||ext=="mtra"||ext=="bmp"||ext=="png"){std::vector<uint8_t>u=d;int sz=int(u.size());int count=sz<100?10+sz%10:sz<200?50+sz%20:sz<300?80+sz%20:100+sz%50;if(sz<count)fail("Resource envelope is too short");for(int k=0;k<count;++k)std::swap(u[size_t(k)],u[size_t(sz-1-k)]);d.swap(u);}}write_bin(out,d);
     ++processed_entries;
     const unsigned extract_percent =
       total_entries
         ? 5u + unsigned((processed_entries * 70u) / total_entries)
         : 75u;
-    progress_set("Extracting resources", n.c_str(),
-                 extract_percent > 75u ? 75u : extract_percent,
-                 unsigned(processed_entries), unsigned(total_entries));
 
     if(n.size()>=5&&n.substr(n.size()-5)==".mbac"){auto m=micro_model(d);if(!m.geometry.empty())g_model_geometry[n]=m.geometry["__geometry"];std::string s=json_string(jo(m.json));write_bin(out+".json",std::vector<uint8_t>(s.begin(),s.end()));}
     else if(n.size()>=5&&n.substr(n.size()-5)==".mtra"){Json a=micro_animation(d);std::string s=json_string(a);write_bin(out+".json",std::vector<uint8_t>(s.begin(),s.end()));}
     else if(n.size()>=4&&n.substr(n.size()-4)==".bmp"){auto p=bmp_png(d,false),pa=bmp_png(d,true);write_bin(out+".png",p);write_bin(out+".alpha.png",pa);}
   }
-  progress_set("Building content pack", "Generating native game data...", 82,
-               unsigned(processed_entries), unsigned(total_entries));
   build_profile(jar,root,z);
 }
 
@@ -1424,7 +1374,6 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
   std::lock_guard<std::mutex> prepare_guard(g_prepare_lock);
   if(!jar_path||!cache_root||!out||!out_size){g_error="Invalid importer arguments";return 0;}
   try{
-    progress_set("Preparing JAR", "Checking archive...", 0, 0, 0);
     long size=0;FILE*f=fopen(jar_path,"rb");if(!f)fail("Cannot open JAR");fseek(f,0,SEEK_END);size=ftell(f);fclose(f);if(size<0||size>16*1024*1024)fail("JAR exceeds 16 MiB.");
     std::string digest=sha256_file(jar_path);std::string base=std::string(cache_root)+"/_jar_import_v5";std::string pack=base+"/"+digest+".abyss";
     if(!file_exists(pack)){
@@ -1433,56 +1382,25 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
       remove_tree(work);
       mkdir_recursive(work);
       extract_jar(jar_path,work);
-      progress_set("Building content pack", "Writing converted .abyss archive...", 92, 0, 0);
       build_pack(work,digest,pack);
-      progress_set("Verifying import", "Checking the generated content pack...", 96, 0, 0);
       validate_generated_pack(pack,work,digest);
       remove_tree(work);
     } else {
       debugPrintf("[jar] cache hit: %s\n",pack.c_str());
-      progress_set("Already imported", "Using cached content pack.", 100, 1, 1);
     }
     if(!file_exists(pack))fail("Native JAR converter did not create a content pack");
     if(pack.size()+1>out_size)fail("Converted pack path is too long");
     snprintf(out,out_size,"%s",pack.c_str());
     g_error.clear();
-    progress_finish("Import complete", "JAR converted successfully.");
     return 1;
   }catch(const std::exception&e){
     g_error=e.what();
     debugPrintf("[jar] %s\n",g_error.c_str());
-    progress_finish("Import failed", g_error.c_str());
     return 0;
   }
 }
 
 } 
-
-extern "C" int jar_import_progress_active(void) {
-  return g_progress_active;
-}
-
-extern "C" int jar_import_progress_read(char *stage, unsigned stage_size,
-                                        char *detail, unsigned detail_size,
-                                        unsigned *percent, unsigned *done,
-                                        unsigned *total) {
-  progress_lock();
-  const int active = g_progress_active;
-  const unsigned p = g_progress_percent;
-  const unsigned d = g_progress_done;
-  const unsigned t = g_progress_total;
-  char s[96], x[256];
-  snprintf(s, sizeof(s), "%s", g_progress_stage);
-  snprintf(x, sizeof(x), "%s", g_progress_detail);
-  progress_unlock();
-
-  if (stage && stage_size) snprintf(stage, stage_size, "%s", s);
-  if (detail && detail_size) snprintf(detail, detail_size, "%s", x);
-  if (percent) *percent = p;
-  if (done) *done = d;
-  if (total) *total = t;
-  return active;
-}
 
 extern "C" int jar_import_prepare(const char*jar_path,const char*cache_root,char*out_path,unsigned out_size){
   return prepare(jar_path,cache_root,out_path,out_size);
