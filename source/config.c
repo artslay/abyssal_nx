@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "config.h"
 #include "util.h"
@@ -25,6 +27,21 @@
   CONFIG_VAR_STR(rendering_method);
 
 Config config;
+
+static void ensure_parent_dir(const char *file) {
+  if (!file) return;
+  char path[512];
+  size_t n = strlen(file);
+  if (n == 0 || n >= sizeof(path)) return;
+  memcpy(path, file, n + 1);
+  for (char *p = path + 1; *p; ++p) {
+    if (*p == '/') {
+      *p = 0;
+      if (*path) mkdir(path, 0777);
+      *p = '/';
+    }
+  }
+}
 
 // actual screen size that is in use right now
 int screen_width = 1280;
@@ -75,6 +92,7 @@ int read_config(const char *file) {
 }
 
 int write_config(const char *file) {
+  ensure_parent_dir(file);
   FILE *f = fopen(file, "w");
   if (f == NULL)
     return -1;
