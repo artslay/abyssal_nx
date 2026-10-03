@@ -1120,7 +1120,7 @@ int main(void) {
   char config_path[320];
   snprintf(config_path, sizeof(config_path), "%s/%s", config.save_root, CONFIG_NAME);
   if (read_config(config_path) != 0 && write_config(config_path) != 0)
-    debugPrintf("[config] could not create %s\\n", config_path);
+    debugPrintf("[config] could not create %s\n", config_path);
 
   // read_config() resets the runtime roots to their compile-time defaults.
   // Resolve once more so copies launched from another /switch/<folder> keep
