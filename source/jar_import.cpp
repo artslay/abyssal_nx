@@ -1392,10 +1392,6 @@ static int prepare(const char*jar_path,const char*cache_root,char*out,unsigned o
         g_cached_jar_mtime == jar_stat.st_mtime &&
         file_exists(g_cached_pack)) {
       pack = g_cached_pack;
-      const std::string prefix = base + "/";
-      if (pack.rfind(prefix, 0) == 0 && pack.size() > prefix.size() + 6) {
-        digest = pack.substr(prefix.size(), pack.size() - prefix.size() - 6);
-      }
     } else {
       digest = sha256_file(jar_path);
       pack = base + "/" + digest + ".abyss";
